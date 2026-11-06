@@ -1032,9 +1032,46 @@ function setView(view) {
   for (const button of $("views").querySelectorAll("button")) {
     button.setAttribute("aria-current", String(button.dataset.view === state.view));
   }
-  if (state.view === "editor" && !$("editor-frame").getAttribute("src")) $("editor-frame").src = EDITOR_URL;
+  if (state.view === "editor" && !$("editor-frame").getAttribute("src")) {
+    shareEditorSettings();
+    $("editor-frame").src = EDITOR_URL;
+  }
   if (state.view === "grid") renderGrid();
   saveSoon();
+}
+
+/* The editor only finds the Bass Station by itself when its port has exactly the name it
+   expects, and on the channel it was last set to. It keeps those choices in this site's
+   storage, so the page fills them in with the ports and channel it's using, and reloads
+   the editor when they change. */
+const EDITOR_SETTINGS = "studiocode.bs2-editor.preferences";
+
+function shareEditorSettings() {
+  let saved = {};
+  try {
+    saved = JSON.parse(JSON.parse(localStorage.getItem(EDITOR_SETTINGS) || "null") || "{}");
+  } catch {
+    saved = {};
+  }
+  const wanted = {
+    midi_channel: state.channel + 1,
+    input_device_id: state.input ? state.input.id : saved.input_device_id ?? null,
+    output_device_id: state.output ? state.output.id : saved.output_device_id ?? null,
+  };
+  const changed = Object.entries(wanted).some(([key, value]) => saved[key] !== value);
+  if (!changed) return false;
+  try {
+    // Stored the way the editor stores it: its settings as JSON, saved as a JSON string.
+    localStorage.setItem(EDITOR_SETTINGS, JSON.stringify(JSON.stringify({ ...saved, ...wanted })));
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function updateEditorSettings() {
+  const frame = $("editor-frame");
+  if (shareEditorSettings() && frame.getAttribute("src")) frame.src = EDITOR_URL;
 }
 
 /* ---------- MIDI ---------- */
@@ -1076,12 +1113,15 @@ function refreshPorts() {
   else if (state.output) setMidiPill(`MIDI: ${state.output.name}`);
   else setMidiPill("Bass Station not found. Connect it and turn it on.", "warn");
 
-  const input = [...state.midi.inputs.values()].find(isBassStation) || null;
+  // The input with the same name as the output, so a renamed or interface port still pairs up.
+  const inputs = [...state.midi.inputs.values()];
+  const input = inputs.find((port) => state.output && port.name === state.output.name) || inputs.find(isBassStation) || null;
   if (input !== state.input) {
     if (state.input) state.input.onmidimessage = null;
     state.input = input;
     if (input) input.onmidimessage = handleMidiInput;
   }
+  updateEditorSettings();
 }
 
 // Knobs turned on the Bass Station are remembered, so drawn knob movements return to them.
@@ -1657,7 +1697,10 @@ function bindControls() {
   number("bpm", (value) => { state.bpm = currentBpm(); $("bpm").value = state.bpm; announceTempo(); void value; });
   number("octave", (value) => { state.lowOctave = value; renderGrid(); });
   number("span", (value) => { state.span = value; renderGrid(); });
-  number("channel", (value) => { state.channel = value - 1; });
+  number("channel", (value) => {
+    state.channel = value - 1;
+    updateEditorSettings();
+  });
   $("new-length").addEventListener("change", (event) => { state.newLength = event.target.value; saveSoon(); });
   $("show-all").addEventListener("change", (event) => {
     state.showAll = event.target.checked;
@@ -1666,6 +1709,8 @@ function bindControls() {
   });
   $("output").addEventListener("change", (event) => {
     state.output = state.midi.outputs.get(event.target.value) || null;
+    // Pairs the input with the new output, and passes both on to the editor.
+    refreshPorts();
     if (state.output) setMidiPill(`MIDI: ${state.output.name}`, isBassStation(state.output) ? "ok" : "");
   });
   $("page-prev").addEventListener("click", () => goToPage(state.page - 1));
