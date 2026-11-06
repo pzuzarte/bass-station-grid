@@ -265,3 +265,21 @@ button.primary { min-width: 68px; background: var(--accent); border-color: var(-
 .editor-credit { margin: 0; padding: 6px 14px; background: var(--panel); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .editor-credit a { color: var(--text); }
 .editor-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+
+.sounds-view { overflow-y: auto; }
+.sounds-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; padding: 12px 14px 20px; align-items: start; }
+.sounds-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.sounds-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sounds-head h2, .backups-title { margin: 0; font-size: 14px; }
+.backups-title { margin-top: 10px; }
+.sounds-note { margin: 0; color: var(--muted); font-size: 12px; }
+.slot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 3px; max-height: 60vh; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.slot-button { width: 100%; height: 30px; display: flex; gap: 8px; align-items: center; text-align: left; font-variant-numeric: tabular-nums; font-size: 12px; }
+.slot-button span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+#sound-search { width: 100%; height: 30px; padding: 0 8px; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; font: inherit; }
+.sound-list { margin: 0; padding: 0; list-style: none; }
+.sound-row { display: flex; align-items: center; gap: 4px; padding: 5px 0; border-top: 1px solid var(--line); }
+.sound-row button { height: 26px; padding: 0 8px; font-size: 12px; }
+.sound-name { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.sound-name small { display: block; color: var(--muted); font-size: 11px; }
+@media (max-width: 900px) { .sounds-columns { grid-template-columns: minmax(0, 1fr); } }

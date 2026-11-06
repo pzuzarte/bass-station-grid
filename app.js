@@ -1026,9 +1026,10 @@ const EDITOR_URL = "editor/";
 
 // The editor is loaded the first time its tab is opened, as it asks for MIDI access.
 function setView(view) {
-  state.view = view === "editor" ? "editor" : "grid";
+  state.view = ["editor", "sounds"].includes(view) ? view : "grid";
   $("grid-view").hidden = state.view !== "grid";
   $("editor-view").hidden = state.view !== "editor";
+  $("sounds-view").hidden = state.view !== "sounds";
   for (const button of $("views").querySelectorAll("button")) {
     button.setAttribute("aria-current", String(button.dataset.view === state.view));
   }
@@ -1083,7 +1084,8 @@ async function initMidi() {
   }
   $("midi-retry").hidden = true;
   try {
-    state.midi = await navigator.requestMIDIAccess({ sysex: false });
+    // SysEx reads patches. Without it, everything but reading still works.
+    state.midi = await navigator.requestMIDIAccess({ sysex: true }).catch(() => navigator.requestMIDIAccess({ sysex: false }));
   } catch (error) {
     setMidiPill("MIDI blocked", "warn");
     $("midi-retry").hidden = false;
@@ -1126,6 +1128,10 @@ function refreshPorts() {
 
 // Knobs turned on the Bass Station are remembered, so drawn knob movements return to them.
 function handleMidiInput(event) {
+  if (event.data[0] === 0xF0) {
+    if (BassSounds.isPatch(event.data)) receivePatch(event.data);
+    return;
+  }
   const [status, first, second] = event.data;
   if ((status & 0x0F) !== state.channel || (status & 0xF0) !== 0xB0) return;
   const param = BassParams.BY_CC.get(first);
@@ -1164,6 +1170,326 @@ function audition(noteList, velocity = 1) {
   }
   const now = performance.now();
   noteList.forEach((note) => sendNote(note, velocity, now, 220));
+}
+
+/* ---------- Sounds tab ---------- */
+
+const SOUNDS_KEY = "bass-station-grid-sounds";
+const PATCH_WAIT_MS = 1500;
+const PATCH_SETTLE_MS = 150; // The Bass Station needs a moment after a program change.
+const sounds = { library: [], backups: [], search: "", waiting: [], busy: null };
+
+// Waits that keep time while the tab is hidden, as Chrome slows a hidden page's own timers.
+const timer = new Worker(URL.createObjectURL(new Blob(
+  ["onmessage = (event) => setTimeout(() => postMessage(event.data.id), event.data.ms);"], { type: "text/javascript" })));
+const timers = new Map();
+let timerId = 0;
+timer.onmessage = (event) => {
+  timers.get(event.data)?.();
+  timers.delete(event.data);
+};
+function pause(ms) {
+  return new Promise((resolve) => {
+    timerId += 1;
+    timers.set(timerId, resolve);
+    timer.postMessage({ id: timerId, ms });
+  });
+}
+
+function loadSounds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SOUNDS_KEY) || "null");
+    if (saved) {
+      sounds.library = (saved.library || []).filter((item) => { try { BassSounds.fromHex(item.data); return true; } catch { return false; } });
+      sounds.backups = (saved.backups || []).filter((backup) => Array.isArray(backup.patches));
+    }
+  } catch {
+    // An unreadable save just means an empty library.
+  }
+}
+
+function saveSounds() {
+  try {
+    localStorage.setItem(SOUNDS_KEY, JSON.stringify({ library: sounds.library, backups: sounds.backups }));
+  } catch {
+    setStatus("Couldn't save the sound library in this browser. Export the sounds you want to keep.", true);
+  }
+}
+
+const today = () => new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+// The next patch the Bass Station sends, or null if none arrives in time.
+function nextPatch() {
+  return new Promise((resolve) => {
+    const waiter = { resolve, done: false };
+    sounds.waiting.push(waiter);
+    pause(PATCH_WAIT_MS).then(() => {
+      if (waiter.done) return;
+      waiter.done = true;
+      sounds.waiting = sounds.waiting.filter((other) => other !== waiter);
+      resolve(null);
+    });
+  });
+}
+
+function receivePatch(bytes) {
+  const waiter = sounds.waiting.shift();
+  if (!waiter) return;
+  waiter.done = true;
+  waiter.resolve(Array.from(bytes));
+}
+
+function readyForPatches() {
+  if (!state.output || !state.input) {
+    setStatus("The Bass Station isn't connected. Check the MIDI output at the bottom.", true);
+    return false;
+  }
+  if (!state.midi.sysexEnabled) {
+    setStatus("Reading patches needs MIDI with SysEx. Click the icon left of the address, allow MIDI devices, then reload.", true);
+    return false;
+  }
+  return true;
+}
+
+async function requestPatch() {
+  const arriving = nextPatch();
+  state.output.send(BassSounds.REQUEST);
+  return arriving;
+}
+
+async function selectSlot(slot) {
+  if (!state.output) {
+    setStatus("No MIDI output connected.", true);
+    return null;
+  }
+  state.output.send([0xC0 | state.channel, slot]);
+  await pause(PATCH_SETTLE_MS);
+  // Asking for the patch also brings the editor up to date, as it hears the reply too.
+  return state.midi.sysexEnabled && state.input ? requestPatch() : null;
+}
+
+async function chooseSlot(slot) {
+  if (sounds.busy) return;
+  const patch = await selectSlot(slot);
+  setStatus(`Chose patch ${slot}${slot < BassSounds.FACTORY.length ? `, "${BassSounds.factoryName(slot)}" from the factory` : ""}.${patch ? "" : " The editor updates once it hears the patch."}`);
+}
+
+async function saveCurrentSound() {
+  if (sounds.busy || !readyForPatches()) return;
+  const patch = await requestPatch();
+  if (!patch) {
+    setStatus("The Bass Station didn't send its patch. Check it's connected, and try again.", true);
+    return;
+  }
+  const slot = BassSounds.slotOf(patch);
+  const name = window.prompt("Name this sound", `Patch ${slot}`)?.trim();
+  if (!name) return;
+  sounds.library.unshift({ id: newId(), name: name.slice(0, 60), from: `Patch ${slot}, ${today()}`, slot, data: BassSounds.toHex(patch) });
+  saveSounds();
+  renderSounds();
+  setStatus(`Saved "${name}" to the library.`);
+}
+
+// Steps through all 128 patches, asking for each, then goes back to the one it started on.
+async function backUpAll() {
+  if (sounds.busy) {
+    sounds.busy.cancelled = true;
+    return;
+  }
+  if (!readyForPatches()) return;
+  if (!window.confirm("This steps the Bass Station through all 128 patches to read each one, then goes back to the one you're on. Unsaved changes to the current sound will be lost. Back up now?")) return;
+  const job = { cancelled: false };
+  sounds.busy = job;
+  $("backup-all").textContent = "Stop";
+  const start = await requestPatch();
+  const patches = [];
+  let missing = 0;
+  for (let slot = 0; slot < BassSounds.SLOTS && !job.cancelled; slot += 1) {
+    setStatus(`Backing up patch ${slot + 1} of ${BassSounds.SLOTS}...`);
+    let patch = await selectSlot(slot);
+    if (!patch) patch = await requestPatch();
+    if (patch) patches.push(BassSounds.toHex(patch));
+    else {
+      patches.push(null);
+      missing += 1;
+    }
+  }
+  if (start) await selectSlot(BassSounds.slotOf(start));
+  sounds.busy = null;
+  $("backup-all").textContent = "Back up all 128";
+  if (job.cancelled) {
+    setStatus("Stopped the backup. Nothing was saved.");
+    return;
+  }
+  sounds.backups.unshift({ id: newId(), saved: new Date().toISOString(), patches });
+  saveSounds();
+  renderSounds();
+  const gaps = missing ? ` ${missing} didn't arrive, so they're missing from it.` : "";
+  setStatus(`Backed up ${patches.length - missing} patches.${gaps} Download it to keep a copy outside this browser.`, Boolean(missing));
+}
+
+// Sends a sound by loading it into the editor, as it knows how to set every control on the synth.
+async function loadSound(item) {
+  const frame = $("editor-frame");
+  if (!frame.getAttribute("src")) {
+    shareEditorSettings();
+    await new Promise((resolve) => {
+      frame.addEventListener("load", resolve, { once: true });
+      frame.src = EDITOR_URL;
+    });
+    // Gives the editor time to connect to the Bass Station.
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+  }
+  const field = frame.contentDocument?.getElementById("patch-file");
+  if (!field) {
+    setStatus("The editor isn't ready yet. Open the Editor tab once, then try again.", true);
+    return;
+  }
+  const files = new DataTransfer();
+  files.items.add(new File([new Uint8Array(BassSounds.fromHex(item.data))], `${item.name}.syx`, { type: "application/octet-stream" }));
+  field.files = files.files;
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  setStatus(`Sent "${item.name}" to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.`);
+}
+
+function download(name, bytes) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/octet-stream" }));
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+const fileName = (name) => name.replace(/[^\w .-]+/g, "").trim() || "sound";
+
+async function importSounds(file) {
+  const patches = BassSounds.split(new Uint8Array(await file.arrayBuffer()));
+  if (!patches.length) {
+    setStatus(`${file.name} has no Bass Station patches.`, true);
+    return;
+  }
+  const base = file.name.replace(/\.syx$/i, "");
+  patches.forEach((patch, index) => {
+    const name = patches.length === 1 ? base : `${base} ${index + 1}`;
+    sounds.library.unshift({ id: newId(), name: name.slice(0, 60), from: `${file.name}, ${today()}`, slot: BassSounds.slotOf(patch), data: BassSounds.toHex(patch) });
+  });
+  saveSounds();
+  renderSounds();
+  setStatus(`Added ${patches.length} ${patches.length === 1 ? "sound" : "sounds"} from ${file.name} to the library.`);
+}
+
+function addBackupToLibrary(backup) {
+  const date = new Date(backup.saved).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  let added = 0;
+  backup.patches.forEach((data, slot) => {
+    if (!data) return;
+    sounds.library.push({ id: newId(), name: slot < BassSounds.FACTORY.length ? `${slot} ${BassSounds.factoryName(slot)}` : `Patch ${slot}`, from: `Backup of ${date}, patch ${slot}`, slot, data });
+    added += 1;
+  });
+  saveSounds();
+  renderSounds();
+  setStatus(`Added ${added} sounds from the backup to the library. Names are the factory ones, so rename any you've changed.`);
+}
+
+function actionButton(label, title, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.title = title;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function renderSounds() {
+  $("slot-list").replaceChildren(...Array.from({ length: BassSounds.SLOTS }, (_, slot) => {
+    const item = document.createElement("li");
+    const button = actionButton(`${slot}`, "Choose this patch on the Bass Station", () => chooseSlot(slot));
+    button.className = "slot-button";
+    const name = document.createElement("span");
+    name.textContent = BassSounds.factoryName(slot);
+    button.append(name);
+    item.append(button);
+    return item;
+  }));
+
+  const words = sounds.search.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = sounds.library.filter((item) => words.every((word) => `${item.name} ${item.from}`.toLowerCase().includes(word)));
+  $("library-empty").hidden = sounds.library.length > 0;
+  $("sound-list").replaceChildren(...shown.map((item) => {
+    const row = document.createElement("li");
+    row.className = "sound-row";
+    const text = document.createElement("span");
+    text.className = "sound-name";
+    text.textContent = item.name;
+    const from = document.createElement("small");
+    from.textContent = item.from;
+    text.append(from);
+    row.append(text,
+      actionButton("Load", "Send this sound to the Bass Station", () => loadSound(item)),
+      actionButton("Rename", "Rename this sound", () => {
+        const name = window.prompt("Rename this sound", item.name)?.trim();
+        if (!name) return;
+        item.name = name.slice(0, 60);
+        saveSounds();
+        renderSounds();
+      }),
+      actionButton("Export", "Download this sound as a .syx file", () => download(`${fileName(item.name)}.syx`, BassSounds.fromHex(item.data))),
+      actionButton("Delete", "Remove this sound from the library", () => {
+        if (!window.confirm(`Delete "${item.name}" from the library?`)) return;
+        sounds.library = sounds.library.filter((other) => other !== item);
+        saveSounds();
+        renderSounds();
+      }));
+    return row;
+  }));
+
+  $("backups-empty").hidden = sounds.backups.length > 0;
+  $("backup-list").replaceChildren(...sounds.backups.map((backup) => {
+    const row = document.createElement("li");
+    row.className = "sound-row";
+    const text = document.createElement("span");
+    text.className = "sound-name";
+    const when = new Date(backup.saved);
+    text.textContent = `${when.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} ${when.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+    const count = document.createElement("small");
+    count.textContent = `${backup.patches.filter(Boolean).length} patches`;
+    text.append(count);
+    row.append(text,
+      actionButton("Download", "Download all its patches as one .syx file", () => {
+        const bytes = backup.patches.filter(Boolean).flatMap((data) => BassSounds.fromHex(data));
+        download(`bass-station-backup-${backup.saved.slice(0, 10)}.syx`, bytes);
+      }),
+      actionButton("Add to library", "Add each of its patches to the library", () => addBackupToLibrary(backup)),
+      actionButton("Delete", "Delete this backup", () => {
+        if (!window.confirm("Delete this backup? Download it first if you want to keep it.")) return;
+        sounds.backups = sounds.backups.filter((other) => other !== backup);
+        saveSounds();
+        renderSounds();
+      }));
+    return row;
+  }));
+}
+
+function bindSounds() {
+  $("backup-all").addEventListener("click", backUpAll);
+  $("save-current").addEventListener("click", saveCurrentSound);
+  $("sound-search").addEventListener("input", (event) => {
+    sounds.search = event.target.value;
+    renderSounds();
+  });
+  $("sound-import").addEventListener("click", () => $("sound-import-file").click());
+  $("sound-import-file").addEventListener("change", (event) => {
+    const [file] = event.target.files;
+    event.target.value = "";
+    if (file) importSounds(file);
+  });
+  $("sound-export-all").addEventListener("click", () => {
+    if (!sounds.library.length) return;
+    download(`bass-station-library-${new Date().toISOString().slice(0, 10)}.syx`, sounds.library.flatMap((item) => BassSounds.fromHex(item.data)));
+  });
 }
 
 /* ---------- Playback ---------- */
@@ -1826,6 +2152,9 @@ async function start() {
   $("chain-on").checked = state.chainOn;
   $("lane").hidden = !state.showLane;
   $("lane-toggle").setAttribute("aria-pressed", String(state.showLane));
+  loadSounds();
+  bindSounds();
+  renderSounds();
   renderAll();
   setView(state.view);
   setStatus("Choose a key, then click or drag on the grid to add notes.");

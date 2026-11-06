@@ -21,6 +21,7 @@
   <h1>Bass Station Grid</h1>
   <nav id="views" class="views" aria-label="Views">
     <button type="button" data-view="editor">Editor</button>
+    <button type="button" data-view="sounds">Sounds</button>
     <button type="button" data-view="grid">Grid</button>
   </nav>
   <div class="field" role="group" aria-labelledby="key-label">
@@ -165,6 +166,38 @@
   <p class="hint">Click: add or remove a step. Drag from an empty step: draw a note. Drag a note: change its length. Cmd-drag: fill steps. Right-click: edit a step. Shift-click: velocity. Click a note name to hear it. Click step numbers: choose steps. Space: play and stop. T: triplets.</p>
 </div>
 
+<div id="sounds-view" class="view sounds-view" hidden>
+  <div class="sounds-columns">
+    <section class="sounds-card" aria-labelledby="slots-title">
+      <div class="sounds-head">
+        <h2 id="slots-title">On the Bass Station</h2>
+        <div class="spacer"></div>
+        <button id="save-current" type="button" title="Ask the Bass Station for the sound it's playing, and add it to the library">Save current sound</button>
+        <button id="backup-all" class="primary" type="button" title="Read all 128 patches from the Bass Station and keep them as a backup">Back up all 128</button>
+      </div>
+      <p class="sounds-note">Click a patch to choose it on the Bass Station. The names are the factory ones, from Novation's patch sheet. Patches 70-127 started as init patches for your own sounds.</p>
+      <ol id="slot-list" class="slot-list"></ol>
+    </section>
+
+    <section class="sounds-card" aria-labelledby="library-title">
+      <div class="sounds-head">
+        <h2 id="library-title">Sound library</h2>
+        <div class="spacer"></div>
+        <button id="sound-import" type="button" title="Add the patches in a .syx file to the library">Import .syx</button>
+        <button id="sound-export-all" type="button" title="Download every sound in the library as one .syx file">Export all</button>
+        <input id="sound-import-file" type="file" accept=".syx,application/octet-stream" hidden>
+      </div>
+      <input id="sound-search" type="search" placeholder="Search names" aria-label="Search sounds" spellcheck="false">
+      <p id="library-empty" class="sounds-note">No sounds yet. Save the current sound, import a .syx file, or add a backup's patches.</p>
+      <ul id="sound-list" class="sound-list"></ul>
+
+      <h2 class="backups-title">Backups</h2>
+      <p id="backups-empty" class="sounds-note">No backups yet. Back up all 128 reads every patch from the Bass Station.</p>
+      <ul id="backup-list" class="sound-list"></ul>
+    </section>
+  </div>
+</div>
+
 <div id="editor-view" class="view editor-view" hidden>
   <p class="editor-credit">The <a href="https://homestudio.app/bs2-editor/" target="_blank" rel="noopener">Bass Station II Web Editor</a> by François Georgy, unchanged. It's free software under the <a href="editor/LICENSE" target="_blank" rel="noopener">GPL-3.0</a>, and its source is <a href="https://github.com/francoisgeorgy/BS2-Web" target="_blank" rel="noopener">on GitHub</a>. Choose the Bass Station under its Settings.</p>
   <iframe id="editor-frame" class="editor-frame" title="Bass Station II Web Editor" allow="midi"></iframe>
@@ -244,6 +277,15 @@
       <li>The editor and the grid both talk to the Bass Station, so you can edit the sound while a pattern plays.</li>
     </ul>
 
+    <h3>Sounds tab</h3>
+    <ul>
+      <li><b>On the Bass Station</b> lists its 128 patches with their factory names, from Novation's patch sheet. Click one to choose it on the synth, and the Editor tab follows. The names are only the factory ones, as the Bass Station doesn't store names, so any you've overwritten still show the factory name.</li>
+      <li><b>Back up all 128</b> steps the Bass Station through every patch, reads each one, and goes back to the patch you were on. It takes about half a minute. Unsaved changes to the current sound are lost, so save first. <b>Download</b> keeps a backup as one .syx file, which other Bass Station tools can read too.</li>
+      <li><b>Save current sound</b> adds the sound the Bass Station is playing to the library, under a name you choose.</li>
+      <li>The <b>Sound library</b> keeps named sounds in this browser. <b>Load</b> sends one to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Import .syx</b> adds sounds from files, and <b>Export</b> and <b>Export all</b> download them. <b>Add to library</b> on a backup adds each of its patches.</li>
+      <li>Reading patches needs MIDI with SysEx, which Chrome asks about the first time.</li>
+    </ul>
+
     <h3>Working in a key</h3>
     <ul>
       <li>Choose a <b>Key</b> and <b>Scale</b>. The grid only shows notes in that key, so anything you draw fits. <b>Move notes with key</b> moves your patterns into a new key when you change it. <b>All notes</b> shows every note.</li>
@@ -290,6 +332,7 @@
 
 <script src="music.js"></script>
 <script src="params.js"></script>
+<script src="sounds.js"></script>
 <script src="sync.js"></script>
 <script src="backup.js"></script>
 <script src="app.js"></script>
