@@ -1,0 +1,8 @@
+{
+  "name": "bass-station-grid",
+  "private": true,
+  "description": "A key-locked pattern grid for the Novation Bass Station II, with a sound editor tab.",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}
