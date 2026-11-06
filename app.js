@@ -28,7 +28,6 @@ const state = {
   queued: null,
   bpm: 120,
   channel: DEFAULT_CHANNEL,
-  chord: "note",
   newLength: "step",
   lowOctave: 3,
   span: 2,
@@ -82,7 +81,7 @@ function saveSoon() {
   window.clearTimeout(state.saveTimer);
   state.saveTimer = window.setTimeout(() => {
     const saved = {};
-    for (const key of ["root", "scale", "moveNotes", "slots", "current", "bpm", "channel", "chord",
+    for (const key of ["root", "scale", "moveNotes", "slots", "current", "bpm", "channel",
       "newLength", "lowOctave", "span", "showAll", "baseResolution", "triplets", "view",
       "chain", "chainOn", "showLane", "laneParam"]) {
       saved[key] = state[key];
@@ -216,8 +215,7 @@ function generatePattern() {
   renderGrid();
   renderChrome();
   saveSoon();
-  const hint = kind === "chords" ? " Set Polyphony to Poly on the VOICE tab to hear full chords." : "";
-  setStatus(`New ${Music.GENERATORS[kind].toLowerCase()} in the key. Generate again for another, or Undo.${hint}`);
+  setStatus(`New ${Music.GENERATORS[kind].toLowerCase()} in the key. Generate again for another, or Undo.`);
 }
 
 function shiftOctave(octaves) {
@@ -571,9 +569,6 @@ function renderStepControls() {
     button.setAttribute("aria-pressed", String(Number(button.dataset.value) === state.baseResolution));
   }
   $("triplets").setAttribute("aria-pressed", String(state.triplets));
-  for (const button of $("chords").querySelectorAll("button")) {
-    button.setAttribute("aria-pressed", String(button.dataset.value === state.chord));
-  }
 }
 
 function renderChrome() {
@@ -640,17 +635,15 @@ function newNoteLength(time) {
   return Math.min(lengths[state.newLength], lengthPulses() - time);
 }
 
-// Adds the note, or the chord built on it, and returns what was added.
+// Adds the note and returns it. The Bass Station plays one note at a time, so it
+// replaces any other note starting in the same step.
 function addNotes(note, time) {
-  const added = [];
-  for (const value of Music.chordNotes(note, state.chord, state.root, state.scale)) {
-    if (notesInCell(value, time).length) continue;
-    const item = { time, note: value, velocity: 1, length: newNoteLength(time), probability: 100 };
-    notes().push(item);
-    added.push(item);
-  }
-  notes().sort((a, b) => a.time - b.time || a.note - b.note);
-  return added;
+  if (notesInCell(note, time).length) return [];
+  const replaced = notes().filter((n) => n.note !== note && n.time >= time && n.time < time + state.resolution);
+  const item = { time, note, velocity: 1, length: newNoteLength(time), probability: 100 };
+  slot().notes = [...notes().filter((n) => !replaced.includes(n)), item].sort((a, b) => a.time - b.time || a.note - b.note);
+  repaintFor(replaced);
+  return [item];
 }
 
 function repaintFor(items) {
@@ -788,7 +781,6 @@ function bindGridEvents() {
     if (on) {
       const added = addNotes(note, time);
       if (needsRowsFor(added)) {
-        // A chord can reach above the rows shown, which adds rows to the grid.
         renderGrid();
       } else {
         repaintFor(added);
@@ -873,10 +865,7 @@ function openNoteEditor(cell) {
   if (!notesInCell(note, time).length) {
     remember();
     remembered = true;
-    const wasChord = state.chord;
-    state.chord = "note";
     addNotes(note, time);
-    state.chord = wasChord;
     renderChrome();
   }
   state.editor = { note, time, remembered };
@@ -1565,6 +1554,16 @@ async function restoreBackup(file) {
 
 const IMPORT_BARS = [1, 2, 4, 8];
 
+// Where a file has chords, keeps the highest note starting at each moment.
+function topNotes(list) {
+  const highest = new Map();
+  for (const note of list) {
+    const kept = highest.get(note.time);
+    if (!kept || note.note > kept.note) highest.set(note.time, note);
+  }
+  return [...highest.values()].sort((a, b) => a.time - b.time);
+}
+
 // Replaces the current pattern, which Undo brings back. The sound doesn't change.
 async function importMidi(file) {
   let parsed;
@@ -1584,7 +1583,7 @@ async function importMidi(file) {
   const end = Math.max(...parsed.notes.map((n) => n.time + n.length));
   const bars = IMPORT_BARS.find((count) => end <= count * BAR) ?? IMPORT_BARS.at(-1);
   const limit = bars * BAR;
-  const kept = parsed.notes
+  const kept = topNotes(parsed.notes)
     .filter((n) => n.time < limit)
     .map((n) => ({ ...n, length: Math.min(n.length, limit - n.time) }));
   slot().bars = bars;
@@ -1628,7 +1627,8 @@ function openHelp() {
 function fillSelects() {
   $("scale").replaceChildren(...Object.entries(Music.SCALES).map(
     ([id, scale]) => new Option(scale.name, id)));
-  $("generator").replaceChildren(...Object.entries(Music.GENERATORS).map(
+  // Chords are left out, as the Bass Station plays one note at a time.
+  $("generator").replaceChildren(...Object.entries(Music.GENERATORS).filter(([id]) => id !== "chords").map(
     ([id, name]) => new Option(name, id)));
   const octaves = [];
   for (let octave = 1; octave <= 6; octave += 1) octaves.push(new Option(`C${octave}`, String(octave)));
@@ -1636,19 +1636,6 @@ function fillSelects() {
   const channels = [];
   for (let channel = 1; channel <= 16; channel += 1) channels.push(new Option(String(channel), String(channel)));
   $("channel").replaceChildren(...channels);
-  $("chords").replaceChildren(...Object.entries(Music.CHORDS).map(([id, chord]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.value = id;
-    button.textContent = chord.name;
-    button.addEventListener("click", () => {
-      state.chord = id;
-      renderStepControls();
-      saveSoon();
-      if (id !== "note") setStatus(`Drawing ${chord.name.toLowerCase()} chords in the key.`);
-    });
-    return button;
-  }));
 }
 
 function bindControls() {
