@@ -1174,10 +1174,17 @@ function audition(noteList, velocity = 1) {
 
 /* ---------- Sounds tab ---------- */
 
-const SOUNDS_KEY = "bass-station-grid-sounds";
+const SOUNDS_KEY = "bass-station-grid-sounds"; // Where sounds were kept before the library folder.
+const BACKUPS = "Backups";
 const PATCH_WAIT_MS = 1500;
 const PATCH_SETTLE_MS = 150; // The Bass Station needs a moment after a program change.
-const sounds = { library: [], backups: [], search: "", waiting: [], busy: null };
+const sounds = { backups: [], search: "", waiting: [], busy: null };
+const library = SoundFolder.create({
+  db: "bass-station-grid-library",
+  check: (bytes) => {
+    if (BassSounds.split(bytes).length !== 1) throw new Error("It isn't one Bass Station patch.");
+  },
+});
 
 // Waits that keep time while the tab is hidden, as Chrome slows a hidden page's own timers.
 const timer = new Worker(URL.createObjectURL(new Blob(
@@ -1196,28 +1203,102 @@ function pause(ms) {
   });
 }
 
-function loadSounds() {
+// Reconnects to the library folder chosen last time.
+async function openLibrary() {
+  await library.restore();
+  const moved = await afterLibraryReady();
+  renderSounds();
+  if (moved) setStatus(moved);
+}
+
+async function chooseLibraryFolder() {
   try {
-    const saved = JSON.parse(localStorage.getItem(SOUNDS_KEY) || "null");
-    if (saved) {
-      sounds.library = (saved.library || []).filter((item) => { try { BassSounds.fromHex(item.data); return true; } catch { return false; } });
-      sounds.backups = (saved.backups || []).filter((backup) => Array.isArray(backup.patches));
-    }
+    if (!(await library.choose({ another: library.status === "ready" }))) return;
+  } catch (error) {
+    setStatus(`Couldn't open that folder: ${error.message}`, true);
+    return;
+  }
+  const moved = await afterLibraryReady();
+  renderSounds();
+  if (library.status === "ready") setStatus(`Using "${library.folder.name}" as the sound library: ${plural(library.items.length, "sound")}.${moved ? ` ${moved}` : ""}`);
+}
+
+const plural = (count, word, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
+
+// Returns a message if sounds kept in the browser were moved into the folder.
+async function afterLibraryReady() {
+  if (library.status !== "ready") return "";
+  const moved = await moveBrowserSounds();
+  await readBackups();
+  return moved;
+}
+
+const sameBytes = (a, b) => a.length === b.length && a.every((byte, index) => byte === b[index]);
+const inLibrary = (bytes) => library.items.some((item) => sameBytes(item.bytes, bytes));
+
+// Sounds and backups kept in the browser before there was a folder move into it, once.
+async function moveBrowserSounds() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(SOUNDS_KEY) || "null");
   } catch {
-    // An unreadable save just means an empty library.
+    // Nothing readable to move.
+  }
+  if (!saved) return "";
+  let moved = 0;
+  let backups = 0;
+  try {
+    for (const item of saved.library || []) {
+      let bytes;
+      try {
+        bytes = BassSounds.fromHex(item.data);
+      } catch {
+        continue;
+      }
+      if (inLibrary(bytes)) continue;
+      await library.add(item.name, bytes, { from: item.from });
+      moved += 1;
+    }
+    const folder = await library.subfolder(BACKUPS);
+    for (const backup of saved.backups || []) {
+      const bytes = (backup.patches || []).filter(Boolean).flatMap((data) => BassSounds.fromHex(data));
+      if (!bytes.length) continue;
+      await folder.write(backupName(new Date(backup.saved)), bytes);
+      backups += 1;
+    }
+  } catch (error) {
+    return `Couldn't move the sounds kept in this browser into the folder: ${error.message}`;
+  }
+  localStorage.removeItem(SOUNDS_KEY);
+  return moved || backups ? `Moved ${plural(moved, "sound")} and ${plural(backups, "backup")} from this browser into it.` : "";
+}
+
+const pad = (number) => String(number).padStart(2, "0");
+const backupName = (date) => `Bass Station backup ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}-${pad(date.getMinutes())}`;
+
+async function readBackups() {
+  try {
+    const files = await (await library.subfolder(BACKUPS)).list();
+    sounds.backups = files.map((file) => ({ ...file, patches: BassSounds.split(file.bytes) })).filter((backup) => backup.patches.length).reverse();
+  } catch {
+    sounds.backups = [];
   }
 }
 
-function saveSounds() {
-  try {
-    localStorage.setItem(SOUNDS_KEY, JSON.stringify({ library: sounds.library, backups: sounds.backups }));
-  } catch {
-    setStatus("Couldn't save the sound library in this browser. Export the sounds you want to keep.", true);
-  }
+// Saving needs the folder, so this says what to do when it isn't ready.
+function libraryReady() {
+  if (library.status === "ready") return true;
+  const advice = {
+    unsupported: "Saving sounds needs a library folder, which needs Chrome or Edge on a computer.",
+    permission: "Click Allow library folder first, so the page can save to it.",
+    missing: "The library folder can't be found. Click Choose library folder.",
+    none: "Click Choose library folder first, to pick where your sounds are saved.",
+  };
+  setStatus(advice[library.status], true);
+  return false;
 }
 
 const today = () => new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 // The next patch the Bass Station sends, or null if none arrives in time.
 function nextPatch() {
@@ -1276,7 +1357,7 @@ async function chooseSlot(slot) {
 }
 
 async function saveCurrentSound() {
-  if (sounds.busy || !readyForPatches()) return;
+  if (sounds.busy || !libraryReady() || !readyForPatches()) return;
   const patch = await requestPatch();
   if (!patch) {
     setStatus("The Bass Station didn't send its patch. Check it's connected, and try again.", true);
@@ -1285,10 +1366,13 @@ async function saveCurrentSound() {
   const slot = BassSounds.slotOf(patch);
   const name = window.prompt("Name this sound", `Patch ${slot}`)?.trim();
   if (!name) return;
-  sounds.library.unshift({ id: newId(), name: name.slice(0, 60), from: `Patch ${slot}, ${today()}`, slot, data: BassSounds.toHex(patch) });
-  saveSounds();
+  try {
+    const saved = await library.add(name, patch, { from: `Patch ${slot}, ${today()}` });
+    setStatus(`Saved "${saved}.syx" in "${library.folder.name}".`);
+  } catch (error) {
+    setStatus(`Couldn't save it to the library folder: ${error.message}`, true);
+  }
   renderSounds();
-  setStatus(`Saved "${name}" to the library.`);
 }
 
 // Steps through all 128 patches, asking for each, then goes back to the one it started on.
@@ -1297,7 +1381,7 @@ async function backUpAll() {
     sounds.busy.cancelled = true;
     return;
   }
-  if (!readyForPatches()) return;
+  if (!libraryReady() || !readyForPatches()) return;
   if (!window.confirm("This steps the Bass Station through all 128 patches to read each one, then goes back to the one you're on. Unsaved changes to the current sound will be lost. Back up now?")) return;
   const job = { cancelled: false };
   sounds.busy = job;
@@ -1309,7 +1393,7 @@ async function backUpAll() {
     setStatus(`Backing up patch ${slot + 1} of ${BassSounds.SLOTS}...`);
     let patch = await selectSlot(slot);
     if (!patch) patch = await requestPatch();
-    if (patch) patches.push(BassSounds.toHex(patch));
+    if (patch) patches.push(patch);
     else {
       patches.push(null);
       missing += 1;
@@ -1322,11 +1406,19 @@ async function backUpAll() {
     setStatus("Stopped the backup. Nothing was saved.");
     return;
   }
-  sounds.backups.unshift({ id: newId(), saved: new Date().toISOString(), patches });
-  saveSounds();
+  const name = backupName(new Date());
+  const bytes = patches.filter(Boolean).flat();
+  try {
+    await (await library.subfolder(BACKUPS)).write(name, bytes);
+  } catch (error) {
+    download(`${name}.syx`, bytes);
+    setStatus(`Couldn't save the backup to the library folder (${error.message}), so it was downloaded instead.`, true);
+    return;
+  }
+  await readBackups();
   renderSounds();
   const gaps = missing ? ` ${missing} didn't arrive, so they're missing from it.` : "";
-  setStatus(`Backed up ${patches.length - missing} patches.${gaps} Download it to keep a copy outside this browser.`, Boolean(missing));
+  setStatus(`Backed up ${patches.length - missing} patches to ${BACKUPS}/${name}.syx in "${library.folder.name}".${gaps}`, Boolean(missing));
 }
 
 // Sends a sound by loading it into the editor, as it knows how to set every control on the synth.
@@ -1347,7 +1439,7 @@ async function loadSound(item) {
     return;
   }
   const files = new DataTransfer();
-  files.items.add(new File([new Uint8Array(BassSounds.fromHex(item.data))], `${item.name}.syx`, { type: "application/octet-stream" }));
+  files.items.add(new File([item.bytes], `${item.name}.syx`, { type: "application/octet-stream" }));
   field.files = files.files;
   field.dispatchEvent(new Event("change", { bubbles: true }));
   setStatus(`Sent "${item.name}" to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.`);
@@ -1366,30 +1458,41 @@ function download(name, bytes) {
 const fileName = (name) => name.replace(/[^\w .-]+/g, "").trim() || "sound";
 
 async function importSounds(file) {
+  if (!libraryReady()) return;
   const patches = BassSounds.split(new Uint8Array(await file.arrayBuffer()));
   if (!patches.length) {
     setStatus(`${file.name} has no Bass Station patches.`, true);
     return;
   }
   const base = file.name.replace(/\.syx$/i, "");
-  patches.forEach((patch, index) => {
-    const name = patches.length === 1 ? base : `${base} ${index + 1}`;
-    sounds.library.unshift({ id: newId(), name: name.slice(0, 60), from: `${file.name}, ${today()}`, slot: BassSounds.slotOf(patch), data: BassSounds.toHex(patch) });
-  });
-  saveSounds();
+  let added = 0;
+  try {
+    for (const [index, patch] of patches.entries()) {
+      if (inLibrary(patch)) continue;
+      await library.add(patches.length === 1 ? base : `${base} ${index + 1}`, patch, { from: `${file.name}, ${today()}` });
+      added += 1;
+    }
+  } catch (error) {
+    setStatus(`Couldn't save to the library folder: ${error.message}`, true);
+  }
   renderSounds();
-  setStatus(`Added ${patches.length} ${patches.length === 1 ? "sound" : "sounds"} from ${file.name} to the library.`);
+  const same = patches.length - added;
+  setStatus(`Added ${added} ${added === 1 ? "sound" : "sounds"} from ${file.name}.${same ? ` ${same === 1 ? "1 was" : `${same} were`} already in the library.` : ""}`);
 }
 
-function addBackupToLibrary(backup) {
-  const date = new Date(backup.saved).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+async function addBackupToLibrary(backup) {
+  if (!libraryReady()) return;
   let added = 0;
-  backup.patches.forEach((data, slot) => {
-    if (!data) return;
-    sounds.library.push({ id: newId(), name: slot < BassSounds.FACTORY.length ? `${slot} ${BassSounds.factoryName(slot)}` : `Patch ${slot}`, from: `Backup of ${date}, patch ${slot}`, slot, data });
-    added += 1;
-  });
-  saveSounds();
+  try {
+    for (const patch of backup.patches) {
+      if (inLibrary(patch)) continue;
+      const slot = BassSounds.slotOf(patch);
+      await library.add(slot < BassSounds.FACTORY.length ? `${slot} ${BassSounds.factoryName(slot)}` : `Patch ${slot}`, patch, { from: `${backup.name}, patch ${slot}` });
+      added += 1;
+    }
+  } catch (error) {
+    setStatus(`Couldn't save to the library folder: ${error.message}`, true);
+  }
   renderSounds();
   setStatus(`Added ${added} sounds from the backup to the library. Names are the factory ones, so rename any you've changed.`);
 }
@@ -1415,9 +1518,24 @@ function renderSounds() {
     return item;
   }));
 
+  const ready = library.status === "ready";
+  const folderState = {
+    unsupported: ["Choose library folder", "Saving sounds to a folder needs Chrome or Edge on a computer."],
+    none: ["Choose library folder", "Choose or create a folder on this computer for your sounds. Each sound is saved there as its own .syx file."],
+    permission: ["Allow library folder", `Allow the page to use "${library.folder?.name}" again.`],
+    missing: ["Choose library folder", `Couldn't read "${library.folder?.name}". Choose it again.`],
+    ready: ["Change folder", ""],
+  }[library.status];
+  $("library-folder").textContent = folderState[0];
+  $("library-folder").disabled = library.status === "unsupported";
+  const skipped = library.skipped ? ` ${library.skipped} files there aren't single Bass Station patches, so they're left out.` : "";
+  $("library-state").textContent = ready ? `"${library.folder.name}": ${plural(library.items.length, "sound")}.${skipped}` : folderState[1];
+  for (const id of ["sound-import", "sound-export-all", "sound-search"]) $(id).disabled = !ready;
+
   const words = sounds.search.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = sounds.library.filter((item) => words.every((word) => `${item.name} ${item.from}`.toLowerCase().includes(word)));
-  $("library-empty").hidden = sounds.library.length > 0;
+  const fromOf = (item) => library.info[item.name]?.from || "";
+  const shown = ready ? library.items.filter((item) => words.every((word) => `${item.name} ${fromOf(item)}`.toLowerCase().includes(word))) : [];
+  $("library-empty").hidden = !ready || library.items.length > 0;
   $("sound-list").replaceChildren(...shown.map((item) => {
     const row = document.createElement("li");
     row.className = "sound-row";
@@ -1425,48 +1543,52 @@ function renderSounds() {
     text.className = "sound-name";
     text.textContent = item.name;
     const from = document.createElement("small");
-    from.textContent = item.from;
+    from.textContent = fromOf(item) || `Patch ${BassSounds.slotOf(BassSounds.split(item.bytes)[0])}`;
     text.append(from);
     row.append(text,
       actionButton("Load", "Send this sound to the Bass Station", () => loadSound(item)),
-      actionButton("Rename", "Rename this sound", () => {
+      actionButton("Rename", "Rename this sound and its file", async () => {
         const name = window.prompt("Rename this sound", item.name)?.trim();
         if (!name) return;
-        item.name = name.slice(0, 60);
-        saveSounds();
+        try {
+          await library.rename(item, name);
+        } catch (error) {
+          setStatus(`Couldn't rename it: ${error.message}`, true);
+        }
         renderSounds();
       }),
-      actionButton("Export", "Download this sound as a .syx file", () => download(`${fileName(item.name)}.syx`, BassSounds.fromHex(item.data))),
-      actionButton("Delete", "Remove this sound from the library", () => {
-        if (!window.confirm(`Delete "${item.name}" from the library?`)) return;
-        sounds.library = sounds.library.filter((other) => other !== item);
-        saveSounds();
+      actionButton("Delete", "Delete this sound's file from the library folder", async () => {
+        if (!window.confirm(`Delete "${item.name}.syx" from the library folder?`)) return;
+        try {
+          await library.remove(item);
+        } catch (error) {
+          setStatus(`Couldn't delete it: ${error.message}`, true);
+        }
         renderSounds();
       }));
     return row;
   }));
 
-  $("backups-empty").hidden = sounds.backups.length > 0;
-  $("backup-list").replaceChildren(...sounds.backups.map((backup) => {
+  $("backups-empty").hidden = !ready || sounds.backups.length > 0;
+  $("backup-list").replaceChildren(...(ready ? sounds.backups : []).map((backup) => {
     const row = document.createElement("li");
     row.className = "sound-row";
     const text = document.createElement("span");
     text.className = "sound-name";
-    const when = new Date(backup.saved);
-    text.textContent = `${when.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} ${when.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+    text.textContent = backup.name;
     const count = document.createElement("small");
-    count.textContent = `${backup.patches.filter(Boolean).length} patches`;
+    count.textContent = `${plural(backup.patches.length, "patch", "patches")}, in the ${BACKUPS} folder`;
     text.append(count);
     row.append(text,
-      actionButton("Download", "Download all its patches as one .syx file", () => {
-        const bytes = backup.patches.filter(Boolean).flatMap((data) => BassSounds.fromHex(data));
-        download(`bass-station-backup-${backup.saved.slice(0, 10)}.syx`, bytes);
-      }),
       actionButton("Add to library", "Add each of its patches to the library", () => addBackupToLibrary(backup)),
-      actionButton("Delete", "Delete this backup", () => {
-        if (!window.confirm("Delete this backup? Download it first if you want to keep it.")) return;
-        sounds.backups = sounds.backups.filter((other) => other !== backup);
-        saveSounds();
+      actionButton("Delete", "Delete this backup's file", async () => {
+        if (!window.confirm(`Delete "${backup.name}.syx" from the ${BACKUPS} folder?`)) return;
+        try {
+          await (await library.subfolder(BACKUPS)).remove(backup.name);
+        } catch (error) {
+          setStatus(`Couldn't delete it: ${error.message}`, true);
+        }
+        await readBackups();
         renderSounds();
       }));
     return row;
@@ -1487,9 +1609,10 @@ function bindSounds() {
     if (file) importSounds(file);
   });
   $("sound-export-all").addEventListener("click", () => {
-    if (!sounds.library.length) return;
-    download(`bass-station-library-${new Date().toISOString().slice(0, 10)}.syx`, sounds.library.flatMap((item) => BassSounds.fromHex(item.data)));
+    if (!library.items.length) return;
+    download(`bass-station-library-${new Date().toISOString().slice(0, 10)}.syx`, library.items.flatMap((item) => [...item.bytes]));
   });
+  $("library-folder").addEventListener("click", chooseLibraryFolder);
 }
 
 /* ---------- Playback ---------- */
@@ -2152,9 +2275,9 @@ async function start() {
   $("chain-on").checked = state.chainOn;
   $("lane").hidden = !state.showLane;
   $("lane-toggle").setAttribute("aria-pressed", String(state.showLane));
-  loadSounds();
   bindSounds();
   renderSounds();
+  openLibrary().catch((error) => setStatus(`Couldn't open the library folder: ${error.message}`, true));
   renderAll();
   setView(state.view);
   setStatus("Choose a key, then click or drag on the grid to add notes.");

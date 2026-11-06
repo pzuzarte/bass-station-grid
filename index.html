@@ -183,16 +183,18 @@
       <div class="sounds-head">
         <h2 id="library-title">Sound library</h2>
         <div class="spacer"></div>
+        <button id="library-folder" type="button" title="Choose the folder on this computer where your sounds are saved">Choose library folder</button>
         <button id="sound-import" type="button" title="Add the patches in a .syx file to the library">Import .syx</button>
         <button id="sound-export-all" type="button" title="Download every sound in the library as one .syx file">Export all</button>
         <input id="sound-import-file" type="file" accept=".syx,application/octet-stream" hidden>
       </div>
+      <p id="library-state" class="sounds-note"></p>
       <input id="sound-search" type="search" placeholder="Search names" aria-label="Search sounds" spellcheck="false">
-      <p id="library-empty" class="sounds-note">No sounds yet. Save the current sound, import a .syx file, or add a backup's patches.</p>
+      <p id="library-empty" class="sounds-note">No sounds in this folder yet. Save the current sound, import a .syx file, or add a backup's patches.</p>
       <ul id="sound-list" class="sound-list"></ul>
 
       <h2 class="backups-title">Backups</h2>
-      <p id="backups-empty" class="sounds-note">No backups yet. Back up all 128 reads every patch from the Bass Station.</p>
+      <p id="backups-empty" class="sounds-note">No backups yet. Back up all 128 reads every patch from the Bass Station, and saves them as one file in the library's Backups folder.</p>
       <ul id="backup-list" class="sound-list"></ul>
     </section>
   </div>
@@ -280,9 +282,11 @@
     <h3>Sounds tab</h3>
     <ul>
       <li><b>On the Bass Station</b> lists its 128 patches with their factory names, from Novation's patch sheet. Click one to choose it on the synth, and the Editor tab follows. The names are only the factory ones, as the Bass Station doesn't store names, so any you've overwritten still show the factory name.</li>
-      <li><b>Back up all 128</b> steps the Bass Station through every patch, reads each one, and goes back to the patch you were on. It takes about half a minute. Unsaved changes to the current sound are lost, so save first. <b>Download</b> keeps a backup as one .syx file, which other Bass Station tools can read too.</li>
+      <li><b>Back up all 128</b> steps the Bass Station through every patch, reads each one, and goes back to the patch you were on. It takes about half a minute. Unsaved changes to the current sound are lost, so save first. The backup is saved as one .syx file in the library folder's <b>Backups</b> folder, which other Bass Station tools can read too.</li>
       <li><b>Save current sound</b> adds the sound the Bass Station is playing to the library, under a name you choose.</li>
-      <li>The <b>Sound library</b> keeps named sounds in this browser. <b>Load</b> sends one to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Import .syx</b> adds sounds from files, and <b>Export</b> and <b>Export all</b> download them. <b>Add to library</b> on a backup adds each of its patches.</li>
+      <li>The <b>Sound library</b> is a folder on this computer that you choose with <b>Choose library folder</b>. Each sound is saved there as its own .syx file, named after the sound, so it's kept even if the browser's data is cleared, and your usual backups include it. Where each sound came from is kept in <b>library-info.json</b> in the same folder. After Chrome restarts, click <b>Allow library folder</b> to use it again.</li>
+      <li>.syx files you put in the folder yourself show up too, if each holds one Bass Station patch.</li>
+      <li><b>Load</b> sends a sound to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Rename</b> and <b>Delete</b> change its file. <b>Import .syx</b> adds every patch in a file, and <b>Export all</b> downloads the whole library as one file. <b>Add to library</b> on a backup adds each of its patches.</li>
       <li>Reading patches needs MIDI with SysEx, which Chrome asks about the first time.</li>
     </ul>
 
@@ -333,6 +337,7 @@
 <script src="music.js"></script>
 <script src="params.js"></script>
 <script src="sounds.js"></script>
+<script src="folder.js"></script>
 <script src="sync.js"></script>
 <script src="backup.js"></script>
 <script src="app.js"></script>
