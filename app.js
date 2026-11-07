@@ -1116,18 +1116,18 @@ function refreshPorts() {
   else setMidiPill("Bass Station not found. Connect it and turn it on.", "warn");
 
   // The input with the same name as the output, so a renamed or interface port still pairs up.
+  // Every input is heard, for recording from any keyboard.
   const inputs = [...state.midi.inputs.values()];
-  const input = inputs.find((port) => state.output && port.name === state.output.name) || inputs.find(isBassStation) || null;
-  if (input !== state.input) {
-    if (state.input) state.input.onmidimessage = null;
-    state.input = input;
-    if (input) input.onmidimessage = handleMidiInput;
-  }
+  state.input = inputs.find((port) => state.output && port.name === state.output.name) || inputs.find(isBassStation) || null;
+  for (const port of inputs) port.onmidimessage = (event) => handleMidiInput(event, port);
+  recorder.refresh(state.midi);
   updateEditorSettings();
 }
 
 // Knobs turned on the Bass Station are remembered, so drawn knob movements return to them.
-function handleMidiInput(event) {
+function handleMidiInput(event, port) {
+  if (recorder.message(event, port)) return;
+  if (port !== state.input) return;
   if (event.data[0] === 0xF0) {
     if (BassSounds.isPatch(event.data)) receivePatch(event.data);
     return;
@@ -1150,9 +1150,57 @@ function sendController(cc, value, atTime) {
 
 const sendParam = (id, value, atTime) => sendController(BassParams.BY_ID.get(id).cc, value, atTime);
 
+/* ---------- Recording ---------- */
+
+let recorder = null;
+
+function moveRecordCursor(time) {
+  if (time < state.windowStart || time >= state.windowStart + state.windowSpan) {
+    goToPage(Math.floor(time / (state.pageBars * BAR)));
+  }
+  selectSteps(time, time);
+}
+
+function setUpRecorder() {
+  recorder = Recorder.create({
+    notes,
+    makeNote: (fields) => ({ ...fields, probability: 100 }),
+    resolution: () => state.resolution,
+    length: () => lengthPulses(),
+    playing: () => state.playing,
+    pulseAt,
+    startStep: () => (state.selection ? state.selection.start : 0),
+    moveCursor: moveRecordCursor,
+    begin: () => {
+      closeNoteEditor({ restoreFocus: false });
+      remember();
+      renderChrome();
+    },
+    // The Bass Station plays one note at a time, so a new note replaces others on its step.
+    added: (item) => {
+      const replaced = notes().filter((n) => n !== item && n.time >= item.time && n.time < item.time + state.resolution);
+      if (replaced.length) slot().notes = notes().filter((n) => !replaced.includes(n));
+      if (needsRowsFor([item])) renderGrid();
+      else repaintFor([item, ...replaced]);
+      renderChrome();
+      saveSoon();
+    },
+    lengthened: () => {
+      renderNoteBars();
+      saveSoon();
+    },
+    status: setStatus,
+    thru: ([status, note, velocity]) => {
+      if (state.output) state.output.send([status | state.channel, note, velocity]);
+    },
+    isInstrument: (port) => port === state.input,
+  }, { storageKey: "bass-station-grid-record-input", button: $("record"), input: $("record-input"), channel: $("record-channel") });
+}
+
 function sendNote(note, velocity, atTime, lengthMs) {
   if (!state.output) return;
   const value = Math.max(1, Math.min(127, Math.round(velocity * 127)));
+  recorder.sent(note, atTime);
   try {
     state.output.send([0x90 | state.channel, note, value], atTime);
     state.output.send([0x80 | state.channel, note, 0], atTime + lengthMs);
@@ -1877,6 +1925,7 @@ function bindLane() {
     saveSoon();
   });
   $("lane-toggle").addEventListener("click", () => setLaneVisible(!state.showLane));
+  setUpRecorder();
   $("lane-copy").addEventListener("click", copyLanesToPattern);
 }
 
