@@ -1515,8 +1515,8 @@ function renderPatterns() {
   }));
 }
 
-const sameBytes = (a, b) => a.length === b.length && a.every((byte, index) => byte === b[index]);
-const inLibrary = (bytes) => library.items.some((item) => sameBytes(item.bytes, bytes));
+// The same sound counts once, wherever it was stored on the Bass Station.
+const inLibrary = (bytes) => library.items.some((item) => BassSounds.sameSound(item.bytes, bytes));
 
 // Sounds and backups kept in the browser before there was a folder move into it, once.
 async function moveBrowserSounds() {
@@ -1750,6 +1750,7 @@ async function importSounds(files) {
   let added = 0;
   let same = 0;
   let empty = 0;
+  let renamed = 0;
   try {
     for (const [number, file] of files.entries()) {
       if (files.length > 1) setStatus(`Importing ${number + 1} of ${files.length}: ${file.name}...`);
@@ -1757,11 +1758,22 @@ async function importSounds(files) {
       if (!patches.length) empty += 1;
       const base = file.name.replace(/\.syx$/i, "");
       for (const [index, patch] of patches.entries()) {
-        if (inLibrary(patch)) {
+        const existing = library.items.find((item) => BassSounds.sameSound(item.bytes, patch));
+        if (existing) {
           same += 1;
+          // A sound imported before patch names were read was named after its file, as
+          // "silverPack 12". Importing it again gives it its own name.
+          const own = BassSounds.patchName(patch);
+          const fileNamed = existing.name === base || new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\d+$`).test(existing.name);
+          if (own && fileNamed && existing.name !== own) {
+            await library.rename(existing, own);
+            renamed += 1;
+          }
           continue;
         }
-        await library.add(patches.length === 1 ? base : `${base} ${index + 1}`, patch, { from: `${file.name}, ${today()}` });
+        // Patches from librarians carry their own names, which are used where there is one.
+        const own = BassSounds.patchName(patch);
+        await library.add(own || (patches.length === 1 ? base : `${base} ${index + 1}`), patch, { from: `${file.name}, ${today()}` });
         added += 1;
       }
     }
@@ -1776,7 +1788,7 @@ async function importSounds(files) {
     setStatus(`${files.length === 1 ? from : "Those files"} ${files.length === 1 ? "has" : "have"} no Bass Station patches.`, true);
     return;
   }
-  const already = same ? ` ${same === 1 ? "1 was" : `${same} were`} already in the library.` : "";
+  const already = same ? ` ${same === 1 ? "1 was" : `${same} were`} already in the library${renamed ? `, and ${plural(renamed, "was", "were")} given ${renamed === 1 ? "its" : "their"} own ${renamed === 1 ? "name" : "names"}` : ""}.` : "";
   const skipped = empty ? ` ${plural(empty, "file")} had no Bass Station patches.` : "";
   setStatus(`Added ${plural(added, "sound")} from ${from}.${already}${skipped}`);
 }

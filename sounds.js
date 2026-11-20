@@ -43,6 +43,21 @@ const BassSounds = (() => {
 
   const slotOf = (patch) => patch[NUMBER_AT];
 
+  // The name stored in the patch's last 16 bytes before F7, or "" if it hasn't one.
+  const NAME_LENGTH = 16;
+  function patchName(patch) {
+    if (patch.length !== LENGTH) return "";
+    const bytes = Array.from(patch.slice(LENGTH - 1 - NAME_LENGTH, LENGTH - 1));
+    if (!bytes.every((byte) => byte >= 0x20 && byte <= 0x7E)) return "";
+    return String.fromCharCode(...bytes).trim();
+  }
+
+  // Two patches are the same sound if they match after the header, which holds where
+  // each was stored, so the same sound saved in two slots counts once.
+  const SOUND_FROM = 10;
+  const sameSound = (a, b) => a.length === b.length
+    && Array.from(a).every((byte, index) => index < SOUND_FROM || byte === b[index]);
+
   const toHex = (bytes) => bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
   function fromHex(text) {
     if (typeof text !== "string" || !/^([0-9a-f]{2})+$/i.test(text)) throw new Error("It has a damaged patch.");
@@ -52,7 +67,7 @@ const BassSounds = (() => {
     return bytes;
   }
 
-  return { FACTORY, LENGTH, REQUEST, SLOTS, factoryName, fromHex, isPatch, slotOf, split, toHex };
+  return { FACTORY, LENGTH, REQUEST, SLOTS, factoryName, fromHex, isPatch, patchName, sameSound, slotOf, split, toHex };
 })();
 
 if (typeof module !== "undefined") module.exports = BassSounds;

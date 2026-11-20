@@ -40,3 +40,25 @@ test("patches survive being stored as text, and damaged text is refused", () => 
 test("the request asks the Bass Station for its current patch", () => {
   assert.deepEqual(BassSounds.REQUEST, [0xF0, 0x00, 0x20, 0x29, 0x00, 0x33, 0x00, 0x40, 0xF7]);
 });
+
+// A whole patch as librarians save it: header, slot at byte 8, sound, then a 16-byte name.
+function namedPatch(slot, name, fill = 3) {
+  const patch = [0xF0, 0x00, 0x20, 0x29, 0x00, 0x33, 0x00, 0x00, slot, 0x00, ...Array(127).fill(fill)];
+  const padded = name.padEnd(16, " ").slice(0, 16);
+  return [...patch, ...Array.from(padded, (char) => char.charCodeAt(0)), 0xF7];
+}
+
+test("a patch's own name is read from its last 16 bytes", () => {
+  assert.equal(namedPatch(0, "Anabass 1").length, BassSounds.LENGTH);
+  assert.equal(BassSounds.patchName(namedPatch(0, "Anabass 1")), "Anabass 1");
+  assert.equal(BassSounds.patchName(namedPatch(5, "Woodpecker KP")), "Woodpecker KP");
+  const unnamed = namedPatch(0, "");
+  unnamed.splice(BassSounds.LENGTH - 17, 16, ...Array(16).fill(0));
+  assert.equal(BassSounds.patchName(unnamed), "", "bytes that aren't text give no name");
+});
+
+test("the same sound stored in two slots counts as one", () => {
+  assert.ok(BassSounds.sameSound(namedPatch(70, "INIT PATCH"), namedPatch(71, "INIT PATCH")));
+  assert.ok(!BassSounds.sameSound(namedPatch(70, "INIT PATCH"), namedPatch(70, "INIT PATCH", 4)));
+  assert.ok(!BassSounds.sameSound(namedPatch(0, "Bass"), namedPatch(0, "Lead")));
+});
