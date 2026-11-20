@@ -276,6 +276,11 @@ button.primary { min-width: 68px; background: var(--accent); border-color: var(-
 .slot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 3px; max-height: 60vh; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
 .slot-button { width: 100%; height: 30px; display: flex; gap: 8px; align-items: center; text-align: left; font-variant-numeric: tabular-nums; font-size: 12px; }
 .slot-button span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.search-row { display: flex; gap: 6px; }
+.search-row #sound-search { flex: 1; min-width: 0; }
+.search-row button { flex: none; height: 30px; }
+.favourite { width: 28px; padding: 0 !important; color: var(--muted); font-size: 15px !important; line-height: 1; background: none !important; border-color: transparent !important; }
+.favourite[aria-pressed="true"] { color: var(--accent); }
 #sound-search, #pattern-search { width: 100%; height: 30px; padding: 0 8px; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; font: inherit; }
 .sound-list { margin: 0; padding: 0; list-style: none; }
 .sound-row { display: flex; align-items: center; gap: 4px; padding: 5px 0; border-top: 1px solid var(--line); }

@@ -32,6 +32,7 @@ const state = {
   lowOctave: 3,
   span: 2,
   showAll: false,
+  favouritesOnly: false, // The Sound library shows only favourites.
   loadedSound: null, // The sound last sent to or chosen on the Bass Station, as bytes, to mark it in the library.
   keyOff: false, // No key: every note shows, and nothing is marked as in or out of it.
   baseResolution: 240,
@@ -84,7 +85,7 @@ function saveSoon() {
   state.saveTimer = window.setTimeout(() => {
     const saved = {};
     for (const key of ["root", "scale", "moveNotes", "slots", "current", "bpm", "channel",
-      "newLength", "lowOctave", "span", "showAll", "keyOff", "loadedSound", "baseResolution", "triplets", "view",
+      "newLength", "lowOctave", "span", "showAll", "keyOff", "loadedSound", "favouritesOnly", "baseResolution", "triplets", "view",
       "chain", "chainOn", "showLane", "laneParam"]) {
       saved[key] = state[key];
     }
@@ -1671,6 +1672,22 @@ function markLoaded(bytes) {
   renderSounds();
 }
 
+// Favourites are kept with each sound's details in the library folder's info file.
+const isFavourite = (item) => Boolean(library.info[item.name]?.favourite);
+
+async function toggleFavourite(item) {
+  const details = { ...(library.info[item.name] || {}) };
+  if (details.favourite) delete details.favourite;
+  else details.favourite = true;
+  library.info[item.name] = details;
+  try {
+    await library.saveInfo();
+  } catch (error) {
+    setStatus(`Couldn't save favourites to the library folder: ${error.message}`, true);
+  }
+  renderSounds();
+}
+
 const isLoaded = (item) => Boolean(state.loadedSound) && BassSounds.sameSound(item.bytes, state.loadedSound);
 
 async function chooseSlot(slot) {
@@ -1901,11 +1918,24 @@ function renderSounds() {
 
   const words = sounds.search.toLowerCase().split(/\s+/).filter(Boolean);
   const fromOf = (item) => library.info[item.name]?.from || "";
-  const shown = ready ? library.items.filter((item) => words.every((word) => `${item.name} ${fromOf(item)}`.toLowerCase().includes(word))) : [];
-  $("library-empty").hidden = !ready || library.items.length > 0;
+  const shown = ready ? library.items.filter((item) => (!state.favouritesOnly || isFavourite(item))
+    && words.every((word) => `${item.name} ${fromOf(item)}`.toLowerCase().includes(word))) : [];
+  $("favourites-only").setAttribute("aria-pressed", String(state.favouritesOnly));
+  $("favourites-only").disabled = !ready;
+  $("library-empty").hidden = !ready || shown.length > 0;
+  $("library-empty").textContent = !library.items.length
+    ? "No sounds in this folder yet. Save the current sound, import a .syx file, or add a backup's patches."
+    : state.favouritesOnly && !library.items.some(isFavourite)
+      ? "No favourites yet. Click the star beside a sound to make it one."
+      : "No sounds match.";
   $("sound-list").replaceChildren(...shown.map((item) => {
     const row = document.createElement("li");
     const loaded = isLoaded(item);
+    const favourite = isFavourite(item);
+    const star = actionButton(favourite ? "\u2605" : "\u2606", favourite ? "Remove from favourites" : "Add to favourites", () => toggleFavourite(item));
+    star.className = "favourite";
+    star.setAttribute("aria-pressed", String(favourite));
+    star.setAttribute("aria-label", `${favourite ? "Remove" : "Add"} ${item.name} ${favourite ? "from" : "to"} favourites`);
     row.className = `sound-row${loaded ? " loaded" : ""}`;
     if (loaded) row.setAttribute("aria-current", "true");
     const text = document.createElement("span");
@@ -1914,7 +1944,7 @@ function renderSounds() {
     const from = document.createElement("small");
     from.textContent = `${loaded ? "On the Bass Station now. " : ""}${fromOf(item) || `Patch ${BassSounds.slotOf(BassSounds.split(item.bytes)[0])}`}`;
     text.append(from);
-    row.append(text,
+    row.append(star, text,
       actionButton(loaded ? "Loaded" : "Load", loaded ? "This sound is on the Bass Station now. Click to send it again." : "Send this sound to the Bass Station", () => loadSound(item)),
       actionButton("Rename", "Rename this sound and its file", async () => {
         const name = window.prompt("Rename this sound", item.name)?.trim();
@@ -1975,6 +2005,11 @@ function bindSounds() {
   $("save-current").addEventListener("click", saveCurrentSound);
   $("sound-search").addEventListener("input", (event) => {
     sounds.search = event.target.value;
+    renderSounds();
+  });
+  $("favourites-only").addEventListener("click", () => {
+    state.favouritesOnly = !state.favouritesOnly;
+    saveSoon();
     renderSounds();
   });
   $("sound-import").addEventListener("click", () => $("sound-import-file").click());
