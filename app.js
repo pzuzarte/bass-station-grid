@@ -1335,7 +1335,8 @@ async function afterLibraryReady() {
 /* ---------- Pattern library ---------- */
 
 // Patterns are kept as .json files in the library folder's Patterns folder, with their
-// notes, bars, knob movements and tempo, so they come back exactly as saved.
+// notes, bars, knob movements and tempo, so they come back exactly as saved, and the
+// Bass Station's sound when they were saved, if it could be read.
 const PATTERNS = "Patterns";
 const patterns = { items: [], search: "" };
 const patternFolder = () => library.subfolder(PATTERNS, ".json");
@@ -1346,11 +1347,14 @@ function readPatternFile(bytes) {
     if (!data || data.app !== "bass-station-grid" || !Array.isArray(data.notes)) return null;
     const notes = data.notes.filter((item) => item && [item.time, item.note, item.length].every(Number.isFinite)
       && item.note >= 0 && item.note <= 127 && item.time >= 0 && item.length > 0);
+    const sound = Array.isArray(data.sound) ? new Uint8Array(data.sound) : null;
     return {
       bars: [1, 2, 4, 8].includes(data.bars) ? data.bars : 4,
       notes,
       lanes: data.lanes && typeof data.lanes === "object" ? data.lanes : null,
       bpm: Number.isFinite(data.bpm) ? Math.max(20, Math.min(300, data.bpm)) : null,
+      sound: sound && BassSounds.split(sound).length === 1 ? sound : null,
+      soundFrom: typeof data.soundFrom === "string" ? data.soundFrom : "",
     };
   } catch {
     return null;
@@ -1390,6 +1394,13 @@ async function savePattern() {
   if (!name) return;
   const fileName = SoundFolder.uniqueName(name, patterns.items.map((item) => item.name));
   const data = { app: "bass-station-grid", version: 1, bars: slot().bars, bpm: currentBpm(), notes: notes(), lanes: slot().lanes || null };
+  // The sound the Bass Station is playing, edits included, if it can be read.
+  const canRead = state.output && state.input && state.midi.sysexEnabled && !sounds.busy;
+  const patch = canRead ? await requestPatch() : null;
+  if (patch) {
+    data.sound = Array.from(patch);
+    data.soundFrom = `Patch ${BassSounds.slotOf(patch)}, ${today()}`;
+  }
   try {
     await (await patternFolder()).write(fileName, new TextEncoder().encode(JSON.stringify(data, null, 1)));
   } catch (error) {
@@ -1398,7 +1409,8 @@ async function savePattern() {
   }
   await readPatterns();
   renderSounds();
-  setStatus(`Saved pattern ${state.current + 1} as "${fileName}" in ${PATTERNS} in "${library.folder.name}".`);
+  const withSound = patch ? ", with the Bass Station's sound" : ". The Bass Station's sound couldn't be read, so it was saved without it";
+  setStatus(`Saved pattern ${state.current + 1} as "${fileName}" in ${PATTERNS} in "${library.folder.name}"${withSound}.`, !patch);
 }
 
 // Shows the saved patterns, on the Library tab.
@@ -1413,8 +1425,9 @@ async function showSavedPatterns() {
     : "No saved patterns yet. Save pattern, on the Grid tab, saves the one you're on.");
 }
 
-// Puts a saved pattern into the current pattern. Undo brings back what was there.
-function loadSavedPattern(item) {
+// Puts a saved pattern into the current pattern, and its sound on the Bass Station unless
+// notesOnly. Undo brings back the notes that were there.
+function loadSavedPattern(item, { notesOnly = false } = {}) {
   stop();
   closeNoteEditor({ restoreFocus: false });
   remember();
@@ -1429,6 +1442,11 @@ function loadSavedPattern(item) {
   renderAll();
   saveSoon();
   setStatus(`Loaded "${item.name}" into pattern ${state.current + 1}. Undo brings back what was there.`);
+  if (item.sound && !notesOnly) {
+    loadSound({ name: item.name, bytes: item.sound }).then(() => {
+      setStatus(`Loaded "${item.name}" into pattern ${state.current + 1}, and sent its sound to the Bass Station. Undo brings back the notes that were there.`);
+    });
+  }
 }
 
 function renderPatterns() {
@@ -1449,10 +1467,14 @@ function renderPatterns() {
     text.className = "sound-name";
     text.textContent = item.name;
     const about = document.createElement("small");
-    about.textContent = `${plural(item.bars, "bar")}, ${plural(item.notes.length, "note")}${item.bpm ? `, ${item.bpm} BPM` : ""}`;
+    about.textContent = `${plural(item.bars, "bar")}, ${plural(item.notes.length, "note")}${item.bpm ? `, ${item.bpm} BPM` : ""}${item.sound ? ", with sound" : ""}`;
+    if (item.soundFrom) about.title = `Sound from ${item.soundFrom}`;
     text.append(about);
-    row.append(text,
-      actionButton("Load", `Put it into pattern ${state.current + 1} on the Grid tab`, () => loadSavedPattern(item)),
+    const buttons = [actionButton("Load", item.sound
+      ? `Put it into pattern ${state.current + 1} on the Grid tab, and send its sound to the Bass Station`
+      : `Put it into pattern ${state.current + 1} on the Grid tab`, () => loadSavedPattern(item))];
+    if (item.sound) buttons.push(actionButton("Notes only", `Put it into pattern ${state.current + 1}, keeping the sound the Bass Station has now`, () => loadSavedPattern(item, { notesOnly: true })));
+    row.append(text, ...buttons,
       actionButton("Rename", "Rename this pattern and its file", async () => {
         const name = SoundFolder.cleanName(window.prompt("Rename this pattern", item.name) || "");
         if (!name || name === item.name) return;
