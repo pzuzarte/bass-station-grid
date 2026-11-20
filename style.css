@@ -282,4 +282,7 @@ button.primary { min-width: 68px; background: var(--accent); border-color: var(-
 .sound-row button { height: 26px; padding: 0 8px; font-size: 12px; }
 .sound-name { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .sound-name small { display: block; color: var(--muted); font-size: 11px; }
+.sound-row.loaded { margin: 0 -8px; padding: 5px 8px; background: rgba(var(--on), 0.16); border-radius: 5px; box-shadow: inset 3px 0 0 var(--accent); }
+.sound-row.loaded .sound-name { color: var(--strong); font-weight: 700; }
+.sound-row.loaded button:first-of-type { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
 @media (max-width: 900px) { .sounds-columns { grid-template-columns: minmax(0, 1fr); } }

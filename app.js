@@ -32,6 +32,7 @@ const state = {
   lowOctave: 3,
   span: 2,
   showAll: false,
+  loadedSound: null, // The sound last sent to or chosen on the Bass Station, as bytes, to mark it in the library.
   keyOff: false, // No key: every note shows, and nothing is marked as in or out of it.
   baseResolution: 240,
   triplets: false,
@@ -83,7 +84,7 @@ function saveSoon() {
   state.saveTimer = window.setTimeout(() => {
     const saved = {};
     for (const key of ["root", "scale", "moveNotes", "slots", "current", "bpm", "channel",
-      "newLength", "lowOctave", "span", "showAll", "keyOff", "baseResolution", "triplets", "view",
+      "newLength", "lowOctave", "span", "showAll", "keyOff", "loadedSound", "baseResolution", "triplets", "view",
       "chain", "chainOn", "showLane", "laneParam"]) {
       saved[key] = state[key];
     }
@@ -1327,10 +1328,41 @@ const plural = (count, word, many = `${word}s`) => `${count} ${count === 1 ? wor
 async function afterLibraryReady() {
   if (library.status !== "ready") return "";
   const moved = await moveBrowserSounds();
+  const cleared = await removeDuplicates();
   await readBackups();
   await readPatterns();
-  return moved;
+  return [moved, clearedMessage(cleared)].filter(Boolean).join(" ");
 }
+
+// Deletes sounds that are the same as another in the library, wherever each was stored on
+// the Bass Station, keeping one of each. The copy named after the patch's own name is the
+// one kept, if there is one. Returns how many were deleted.
+async function removeDuplicates() {
+  const kept = [];
+  const extra = [];
+  for (const item of library.items) {
+    const index = kept.findIndex((other) => BassSounds.sameSound(other.bytes, item.bytes));
+    if (index < 0) {
+      kept.push(item);
+      continue;
+    }
+    const own = BassSounds.patchName(item.bytes);
+    if (own && item.name === own && kept[index].name !== own) {
+      extra.push(kept[index]);
+      kept[index] = item;
+    } else {
+      extra.push(item);
+    }
+  }
+  try {
+    for (const item of extra) await library.remove(item);
+  } catch (error) {
+    setStatus(`Couldn't clear duplicate sounds from the library folder: ${error.message}`, true);
+  }
+  return extra.length;
+}
+
+const clearedMessage = (count) => (count ? `Cleared ${plural(count, "duplicate sound")} from the library.` : "");
 
 /* ---------- Pattern library ---------- */
 
@@ -1632,9 +1664,19 @@ async function selectSlot(slot) {
   return state.midi.sysexEnabled && state.input ? requestPatch() : null;
 }
 
+// Remembers the sound the Bass Station has now, so the library marks it, or forgets it.
+function markLoaded(bytes) {
+  state.loadedSound = bytes ? Array.from(bytes) : null;
+  saveSoon();
+  renderSounds();
+}
+
+const isLoaded = (item) => Boolean(state.loadedSound) && BassSounds.sameSound(item.bytes, state.loadedSound);
+
 async function chooseSlot(slot) {
   if (sounds.busy) return;
   const patch = await selectSlot(slot);
+  markLoaded(patch);
   setStatus(`Chose patch ${slot}${slot < BassSounds.FACTORY.length ? `, "${BassSounds.factoryName(slot)}" from the factory` : ""}.${patch ? "" : " The editor updates once it hears the patch."}`);
 }
 
@@ -1650,6 +1692,7 @@ async function saveCurrentSound() {
   if (!name) return;
   try {
     const saved = await library.add(name, patch, { from: `Patch ${slot}, ${today()}` });
+    markLoaded(patch);
     setStatus(`Saved "${saved}.syx" in "${library.folder.name}".`);
   } catch (error) {
     setStatus(`Couldn't save it to the library folder: ${error.message}`, true);
@@ -1728,6 +1771,7 @@ async function loadSound(item) {
   files.items.add(new File([item.bytes], `${item.name}.syx`, { type: "application/octet-stream" }));
   field.files = files.files;
   field.dispatchEvent(new Event("change", { bubbles: true }));
+  markLoaded(item.bytes);
   setStatus(`Sent "${item.name}" to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.`);
 }
 
@@ -1782,6 +1826,7 @@ async function importSounds(files) {
     renderSounds();
     return;
   }
+  const cleared = await removeDuplicates();
   renderSounds();
   const from = files.length === 1 ? files[0].name : plural(files.length, "file");
   if (empty === files.length) {
@@ -1790,7 +1835,7 @@ async function importSounds(files) {
   }
   const already = same ? ` ${same === 1 ? "1 was" : `${same} were`} already in the library${renamed ? `, and ${plural(renamed, "was", "were")} given ${renamed === 1 ? "its" : "their"} own ${renamed === 1 ? "name" : "names"}` : ""}.` : "";
   const skipped = empty ? ` ${plural(empty, "file")} had no Bass Station patches.` : "";
-  setStatus(`Added ${plural(added, "sound")} from ${from}.${already}${skipped}`);
+  setStatus(`Added ${plural(added, "sound")} from ${from}.${already}${skipped}${cleared ? ` ${clearedMessage(cleared)}` : ""}`);
 }
 
 // Adds a backup's patches to the sound library, leaving out any it already has. Returns
@@ -1860,15 +1905,17 @@ function renderSounds() {
   $("library-empty").hidden = !ready || library.items.length > 0;
   $("sound-list").replaceChildren(...shown.map((item) => {
     const row = document.createElement("li");
-    row.className = "sound-row";
+    const loaded = isLoaded(item);
+    row.className = `sound-row${loaded ? " loaded" : ""}`;
+    if (loaded) row.setAttribute("aria-current", "true");
     const text = document.createElement("span");
     text.className = "sound-name";
     text.textContent = item.name;
     const from = document.createElement("small");
-    from.textContent = fromOf(item) || `Patch ${BassSounds.slotOf(BassSounds.split(item.bytes)[0])}`;
+    from.textContent = `${loaded ? "On the Bass Station now. " : ""}${fromOf(item) || `Patch ${BassSounds.slotOf(BassSounds.split(item.bytes)[0])}`}`;
     text.append(from);
     row.append(text,
-      actionButton("Load", "Send this sound to the Bass Station", () => loadSound(item)),
+      actionButton(loaded ? "Loaded" : "Load", loaded ? "This sound is on the Bass Station now. Click to send it again." : "Send this sound to the Bass Station", () => loadSound(item)),
       actionButton("Rename", "Rename this sound and its file", async () => {
         const name = window.prompt("Rename this sound", item.name)?.trim();
         if (!name) return;
