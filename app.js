@@ -1936,16 +1936,23 @@ function renderSounds() {
     star.className = "favourite";
     star.setAttribute("aria-pressed", String(favourite));
     star.setAttribute("aria-label", `${favourite ? "Remove" : "Add"} ${item.name} ${favourite ? "from" : "to"} favourites`);
-    row.className = `sound-row${loaded ? " loaded" : ""}`;
+    row.className = `sound-row selectable${loaded ? " loaded" : ""}`;
     if (loaded) row.setAttribute("aria-current", "true");
-    const text = document.createElement("span");
+    // The name is a button, so clicking anywhere on the row, or pressing Enter on it,
+    // sends the sound to the Bass Station.
+    const text = document.createElement("button");
+    text.type = "button";
     text.className = "sound-name";
     text.textContent = item.name;
+    text.title = loaded ? "This sound is on the Bass Station now. Click to send it again." : "Send this sound to the Bass Station";
     const from = document.createElement("small");
     from.textContent = `${loaded ? "On the Bass Station now. " : ""}${fromOf(item) || `Patch ${BassSounds.slotOf(BassSounds.split(item.bytes)[0])}`}`;
     text.append(from);
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("button") && !event.target.closest(".sound-name")) return;
+      loadSound(item);
+    });
     row.append(star, text,
-      actionButton(loaded ? "Loaded" : "Load", loaded ? "This sound is on the Bass Station now. Click to send it again." : "Send this sound to the Bass Station", () => loadSound(item)),
       actionButton("Rename", "Rename this sound and its file", async () => {
         const name = window.prompt("Rename this sound", item.name)?.trim();
         if (!name) return;

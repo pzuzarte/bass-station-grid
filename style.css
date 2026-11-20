@@ -289,5 +289,7 @@ button.primary { min-width: 68px; background: var(--accent); border-color: var(-
 .sound-name small { display: block; color: var(--muted); font-size: 11px; }
 .sound-row.loaded { margin: 0 -8px; padding: 5px 8px; background: rgba(var(--on), 0.16); border-radius: 5px; box-shadow: inset 3px 0 0 var(--accent); }
 .sound-row.loaded .sound-name { color: var(--strong); font-weight: 700; }
-.sound-row.loaded button:first-of-type { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
+.sound-row.selectable { margin: 0 -8px; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.sound-row.selectable:hover:not(.loaded) { background: var(--panel-2); }
+button.sound-name { height: auto !important; padding: 0 !important; color: var(--text); text-align: left; background: none; border: 0; font: inherit; font-size: 13px !important; cursor: pointer; }
 @media (max-width: 900px) { .sounds-columns { grid-template-columns: minmax(0, 1fr); } }
