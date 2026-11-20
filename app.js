@@ -1401,6 +1401,15 @@ async function savePattern() {
     data.sound = Array.from(patch);
     data.soundFrom = `Patch ${BassSounds.slotOf(patch)}, ${today()}`;
   }
+  // The sound also goes into the sound library, named after the pattern, unless it's there.
+  let soundAdded = null;
+  if (patch && !inLibrary(patch)) {
+    try {
+      soundAdded = await library.add(fileName, patch, { from: `Pattern "${fileName}", ${data.soundFrom}` });
+    } catch {
+      soundAdded = null;
+    }
+  }
   try {
     await (await patternFolder()).write(fileName, new TextEncoder().encode(JSON.stringify(data, null, 1)));
   } catch (error) {
@@ -1409,7 +1418,9 @@ async function savePattern() {
   }
   await readPatterns();
   renderSounds();
-  const withSound = patch ? ", with the Bass Station's sound" : ". The Bass Station's sound couldn't be read, so it was saved without it";
+  const withSound = !patch
+    ? ". The Bass Station's sound couldn't be read, so it was saved without it"
+    : soundAdded ? `, with the Bass Station's sound, which is also in the sound library as "${soundAdded}"` : ", with the Bass Station's sound, which is already in the sound library";
   setStatus(`Saved pattern ${state.current + 1} as "${fileName}" in ${PATTERNS} in "${library.folder.name}"${withSound}.`, !patch);
 }
 
@@ -1686,10 +1697,14 @@ async function backUpAll() {
     setStatus(`Couldn't save the backup to the library folder (${error.message}), so it was downloaded instead.`, true);
     return;
   }
+  // Every patch read also goes into the sound library, so each can be loaded on its own.
+  setStatus("Adding the patches to the sound library...");
+  const added = await addPatchesToLibrary({ name, patches });
   await readBackups();
   renderSounds();
+  if (added === null) return;
   const gaps = missing ? ` ${missing} didn't arrive, so they're missing from it.` : "";
-  setStatus(`Backed up ${patches.length - missing} patches to ${BACKUPS}/${name}.syx in "${library.folder.name}".${gaps}`, Boolean(missing));
+  setStatus(`Backed up ${patches.length - missing} patches to ${BACKUPS}/${name}.syx in "${library.folder.name}", and added ${plural(added, "new sound")} to the library. Names are the factory ones, so rename any you've changed.${gaps}`, Boolean(missing));
 }
 
 // Sends a sound by loading it into the editor, as it knows how to set every control on the synth.
@@ -1751,21 +1766,29 @@ async function importSounds(file) {
   setStatus(`Added ${added} ${added === 1 ? "sound" : "sounds"} from ${file.name}.${same ? ` ${same === 1 ? "1 was" : `${same} were`} already in the library.` : ""}`);
 }
 
-async function addBackupToLibrary(backup) {
-  if (!libraryReady()) return;
+// Adds a backup's patches to the sound library, leaving out any it already has. Returns
+// how many were added, or null if the folder couldn't be written.
+async function addPatchesToLibrary(backup) {
   let added = 0;
   try {
     for (const patch of backup.patches) {
-      if (inLibrary(patch)) continue;
+      if (!patch || inLibrary(patch)) continue;
       const slot = BassSounds.slotOf(patch);
       await library.add(slot < BassSounds.FACTORY.length ? `${slot} ${BassSounds.factoryName(slot)}` : `Patch ${slot}`, patch, { from: `${backup.name}, patch ${slot}` });
       added += 1;
     }
   } catch (error) {
     setStatus(`Couldn't save to the library folder: ${error.message}`, true);
+    return null;
   }
+  return added;
+}
+
+async function addBackupToLibrary(backup) {
+  if (!libraryReady()) return;
+  const added = await addPatchesToLibrary(backup);
   renderSounds();
-  setStatus(`Added ${added} sounds from the backup to the library. Names are the factory ones, so rename any you've changed.`);
+  if (added !== null) setStatus(`Added ${added} sounds from the backup to the library. Names are the factory ones, so rename any you've changed.`);
 }
 
 function actionButton(label, title, onClick) {
