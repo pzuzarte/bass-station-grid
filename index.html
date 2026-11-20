@@ -21,7 +21,7 @@
   <h1>Bass Station Grid</h1>
   <nav id="views" class="views" aria-label="Views">
     <button type="button" data-view="editor">Editor</button>
-    <button type="button" data-view="sounds">Sounds</button>
+    <button type="button" data-view="sounds">Library</button>
     <button type="button" data-view="grid">Grid</button>
   </nav>
   <div class="field" role="group" aria-labelledby="key-label">
@@ -52,6 +52,7 @@
     <button id="generate" type="button" title="Replaces this pattern with a new one in the key. Undo brings the old one back.">Generate</button>
     <button id="undo" type="button" disabled>Undo</button>
     <button id="duplicate" type="button" title="Copy this pattern to the next empty slot">Duplicate</button>
+    <button id="save-pattern" type="button" title="Save this pattern by name in the library folder. Saved patterns are on the Library tab.">Save pattern</button>
     <button id="clear" type="button">Clear</button>
   </section>
 
@@ -200,6 +201,11 @@
       <p id="library-empty" class="sounds-note">No sounds in this folder yet. Save the current sound, import a .syx file, or add a backup's patches.</p>
       <ul id="sound-list" class="sound-list"></ul>
 
+      <h2 class="backups-title">Patterns</h2>
+      <input id="pattern-search" type="search" placeholder="Search patterns" aria-label="Search patterns" spellcheck="false">
+      <p id="patterns-empty" class="sounds-note"></p>
+      <ul id="pattern-list" class="sound-list"></ul>
+
       <h2 class="backups-title">Backups</h2>
       <p id="backups-empty" class="sounds-note">No backups yet. Back up all 128 reads every patch from the Bass Station, and saves them as one file in the library's Backups folder.</p>
       <ul id="backup-list" class="sound-list"></ul>
@@ -286,13 +292,14 @@
       <li>The editor and the grid both talk to the Bass Station, so you can edit the sound while a pattern plays.</li>
     </ul>
 
-    <h3>Sounds tab</h3>
+    <h3>Library tab</h3>
     <ul>
       <li><b>On the Bass Station</b> lists its 128 patches with their factory names, from Novation's patch sheet. Click one to choose it on the synth, and the Editor tab follows. The names are only the factory ones, as the Bass Station doesn't store names, so any you've overwritten still show the factory name.</li>
       <li><b>Back up all 128</b> steps the Bass Station through every patch, reads each one, and goes back to the patch you were on. It takes about half a minute. Unsaved changes to the current sound are lost, so save first. The backup is saved as one .syx file in the library folder's <b>Backups</b> folder, which other Bass Station tools can read too.</li>
       <li><b>Save current sound</b> adds the sound the Bass Station is playing to the library, under a name you choose.</li>
       <li>The <b>Sound library</b> is a folder on this computer that you choose with <b>Choose library folder</b>. Each sound is saved there as its own .syx file, named after the sound, so it's kept even if the browser's data is cleared, and your usual backups include it. Where each sound came from is kept in <b>library-info.json</b> in the same folder. After Chrome restarts, click <b>Allow library folder</b> to use it again.</li>
       <li>.syx files you put in the folder yourself show up too, if each holds one Bass Station patch.</li>
+      <li><b>Patterns</b>: <b>Save pattern</b>, next to the patterns on the Grid tab, saves the one you're on by name, with its notes, bars, knob movements and tempo. Each is a .json file in the library folder's <b>Patterns</b> folder. On the Library tab, <b>Load</b> puts a saved pattern into the pattern you're on, and Undo brings back what was there. Export MIDI still makes a .mid file for other music software.</li>
       <li><b>Load</b> sends a sound to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Rename</b> and <b>Delete</b> change its file. <b>Import .syx</b> adds every patch in a file, and <b>Export all</b> downloads the whole library as one file. <b>Add to library</b> on a backup adds each of its patches.</li>
       <li>Reading patches needs MIDI with SysEx, which Chrome asks about the first time.</li>
     </ul>

@@ -1328,7 +1328,136 @@ async function afterLibraryReady() {
   if (library.status !== "ready") return "";
   const moved = await moveBrowserSounds();
   await readBackups();
+  await readPatterns();
   return moved;
+}
+
+/* ---------- Pattern library ---------- */
+
+// Patterns are kept as .json files in the library folder's Patterns folder, with their
+// notes, bars, knob movements and tempo, so they come back exactly as saved.
+const PATTERNS = "Patterns";
+const patterns = { items: [], search: "" };
+const patternFolder = () => library.subfolder(PATTERNS, ".json");
+
+function readPatternFile(bytes) {
+  try {
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    if (!data || data.app !== "bass-station-grid" || !Array.isArray(data.notes)) return null;
+    const notes = data.notes.filter((item) => item && [item.time, item.note, item.length].every(Number.isFinite)
+      && item.note >= 0 && item.note <= 127 && item.time >= 0 && item.length > 0);
+    return {
+      bars: [1, 2, 4, 8].includes(data.bars) ? data.bars : 4,
+      notes,
+      lanes: data.lanes && typeof data.lanes === "object" ? data.lanes : null,
+      bpm: Number.isFinite(data.bpm) ? Math.max(20, Math.min(300, data.bpm)) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readPatterns() {
+  patterns.items = [];
+  if (library.status !== "ready") return;
+  try {
+    for (const file of await (await patternFolder()).list()) {
+      const pattern = readPatternFile(file.bytes);
+      if (pattern) patterns.items.push({ name: file.name, ...pattern });
+    }
+  } catch {
+    // The folder can't be read, so the list stays empty.
+  }
+}
+
+async function savePattern() {
+  if (!libraryReady()) return;
+  if (!notes().length && !(slot().lanes && Object.keys(slot().lanes).length)) {
+    setStatus("This pattern is empty, so there's nothing to save.", true);
+    return;
+  }
+  const name = SoundFolder.cleanName(window.prompt("Name this pattern", `Pattern ${state.current + 1}`) || "");
+  if (!name) return;
+  const fileName = SoundFolder.uniqueName(name, patterns.items.map((item) => item.name));
+  const data = { app: "bass-station-grid", version: 1, bars: slot().bars, bpm: currentBpm(), notes: notes(), lanes: slot().lanes || null };
+  try {
+    await (await patternFolder()).write(fileName, new TextEncoder().encode(JSON.stringify(data, null, 1)));
+  } catch (error) {
+    setStatus(`Couldn't save it to the library folder: ${error.message}`, true);
+    return;
+  }
+  await readPatterns();
+  renderSounds();
+  setStatus(`Saved pattern ${state.current + 1} as "${fileName}" in ${PATTERNS} in "${library.folder.name}".`);
+}
+
+// Puts a saved pattern into the current pattern. Undo brings back what was there.
+function loadSavedPattern(item) {
+  stop();
+  closeNoteEditor({ restoreFocus: false });
+  remember();
+  state.slots[state.current] = { bars: item.bars, notes: JSON.parse(JSON.stringify(item.notes)) };
+  if (item.lanes) state.slots[state.current].lanes = JSON.parse(JSON.stringify(item.lanes));
+  if (item.bpm) state.bpm = item.bpm;
+  if (item.notes.length) {
+    const lowest = Math.min(...item.notes.map((n) => n.note));
+    state.lowOctave = Math.max(1, Math.min(6, Math.floor(lowest / 12) - 1));
+  }
+  state.page = 0;
+  renderAll();
+  saveSoon();
+  setStatus(`Loaded "${item.name}" into pattern ${state.current + 1}. Undo brings back what was there.`);
+}
+
+function renderPatterns() {
+  const ready = library.status === "ready";
+  $("pattern-search").disabled = !ready;
+  const words = patterns.search.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = ready ? patterns.items.filter((item) => words.every((word) => item.name.toLowerCase().includes(word))) : [];
+  $("patterns-empty").hidden = ready && shown.length > 0;
+  $("patterns-empty").textContent = !ready
+    ? "Patterns are saved in the library folder too. Choose it under Sound library."
+    : patterns.items.length
+      ? "No saved patterns match that search."
+      : "No saved patterns yet. Save pattern, next to the patterns on the Grid tab, saves the one you're on.";
+  $("pattern-list").replaceChildren(...shown.map((item) => {
+    const row = document.createElement("li");
+    row.className = "sound-row";
+    const text = document.createElement("span");
+    text.className = "sound-name";
+    text.textContent = item.name;
+    const about = document.createElement("small");
+    about.textContent = `${plural(item.bars, "bar")}, ${plural(item.notes.length, "note")}${item.bpm ? `, ${item.bpm} BPM` : ""}`;
+    text.append(about);
+    row.append(text,
+      actionButton("Load", `Put it into pattern ${state.current + 1} on the Grid tab`, () => loadSavedPattern(item)),
+      actionButton("Rename", "Rename this pattern and its file", async () => {
+        const name = SoundFolder.cleanName(window.prompt("Rename this pattern", item.name) || "");
+        if (!name || name === item.name) return;
+        const fileName = SoundFolder.uniqueName(name, patterns.items.filter((other) => other !== item).map((other) => other.name));
+        try {
+          const folder = await patternFolder();
+          const [file] = (await folder.list()).filter((entry) => entry.name === item.name);
+          await folder.write(fileName, file.bytes);
+          await folder.remove(item.name);
+        } catch (error) {
+          setStatus(`Couldn't rename it: ${error.message}`, true);
+        }
+        await readPatterns();
+        renderSounds();
+      }),
+      actionButton("Delete", "Delete this pattern's file from the library folder", async () => {
+        if (!window.confirm(`Delete "${item.name}.json" from the ${PATTERNS} folder?`)) return;
+        try {
+          await (await patternFolder()).remove(item.name);
+        } catch (error) {
+          setStatus(`Couldn't delete it: ${error.message}`, true);
+        }
+        await readPatterns();
+        renderSounds();
+      }));
+    return row;
+  }));
 }
 
 const sameBytes = (a, b) => a.length === b.length && a.every((byte, index) => byte === b[index]);
@@ -1605,6 +1734,7 @@ function actionButton(label, title, onClick) {
 }
 
 function renderSounds() {
+  renderPatterns();
   $("slot-list").replaceChildren(...Array.from({ length: BassSounds.SLOTS }, (_, slot) => {
     const item = document.createElement("li");
     const button = actionButton(`${slot}`, "Choose this patch on the Bass Station", () => chooseSlot(slot));
@@ -1694,6 +1824,11 @@ function renderSounds() {
 }
 
 function bindSounds() {
+  $("save-pattern").addEventListener("click", savePattern);
+  $("pattern-search").addEventListener("input", (event) => {
+    patterns.search = event.target.value;
+    renderPatterns();
+  });
   $("backup-all").addEventListener("click", backUpAll);
   $("save-current").addEventListener("click", saveCurrentSound);
   $("sound-search").addEventListener("input", (event) => {

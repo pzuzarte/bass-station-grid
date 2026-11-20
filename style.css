@@ -276,7 +276,7 @@ button.primary { min-width: 68px; background: var(--accent); border-color: var(-
 .slot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 3px; max-height: 60vh; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
 .slot-button { width: 100%; height: 30px; display: flex; gap: 8px; align-items: center; text-align: left; font-variant-numeric: tabular-nums; font-size: 12px; }
 .slot-button span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-#sound-search { width: 100%; height: 30px; padding: 0 8px; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; font: inherit; }
+#sound-search, #pattern-search { width: 100%; height: 30px; padding: 0 8px; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; font: inherit; }
 .sound-list { margin: 0; padding: 0; list-style: none; }
 .sound-row { display: flex; align-items: center; gap: 4px; padding: 5px 0; border-top: 1px solid var(--line); }
 .sound-row button { height: 26px; padding: 0 8px; font-size: 12px; }
