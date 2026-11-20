@@ -1743,27 +1743,42 @@ function download(name, bytes) {
 
 const fileName = (name) => name.replace(/[^\w .-]+/g, "").trim() || "sound";
 
-async function importSounds(file) {
+// Adds every patch in one or more .syx files, such as a whole sound pack, leaving out
+// patches the library already has.
+async function importSounds(files) {
   if (!libraryReady()) return;
-  const patches = BassSounds.split(new Uint8Array(await file.arrayBuffer()));
-  if (!patches.length) {
-    setStatus(`${file.name} has no Bass Station patches.`, true);
-    return;
-  }
-  const base = file.name.replace(/\.syx$/i, "");
   let added = 0;
+  let same = 0;
+  let empty = 0;
   try {
-    for (const [index, patch] of patches.entries()) {
-      if (inLibrary(patch)) continue;
-      await library.add(patches.length === 1 ? base : `${base} ${index + 1}`, patch, { from: `${file.name}, ${today()}` });
-      added += 1;
+    for (const [number, file] of files.entries()) {
+      if (files.length > 1) setStatus(`Importing ${number + 1} of ${files.length}: ${file.name}...`);
+      const patches = BassSounds.split(new Uint8Array(await file.arrayBuffer()));
+      if (!patches.length) empty += 1;
+      const base = file.name.replace(/\.syx$/i, "");
+      for (const [index, patch] of patches.entries()) {
+        if (inLibrary(patch)) {
+          same += 1;
+          continue;
+        }
+        await library.add(patches.length === 1 ? base : `${base} ${index + 1}`, patch, { from: `${file.name}, ${today()}` });
+        added += 1;
+      }
     }
   } catch (error) {
     setStatus(`Couldn't save to the library folder: ${error.message}`, true);
+    renderSounds();
+    return;
   }
   renderSounds();
-  const same = patches.length - added;
-  setStatus(`Added ${added} ${added === 1 ? "sound" : "sounds"} from ${file.name}.${same ? ` ${same === 1 ? "1 was" : `${same} were`} already in the library.` : ""}`);
+  const from = files.length === 1 ? files[0].name : plural(files.length, "file");
+  if (empty === files.length) {
+    setStatus(`${files.length === 1 ? from : "Those files"} ${files.length === 1 ? "has" : "have"} no Bass Station patches.`, true);
+    return;
+  }
+  const already = same ? ` ${same === 1 ? "1 was" : `${same} were`} already in the library.` : "";
+  const skipped = empty ? ` ${plural(empty, "file")} had no Bass Station patches.` : "";
+  setStatus(`Added ${plural(added, "sound")} from ${from}.${already}${skipped}`);
 }
 
 // Adds a backup's patches to the sound library, leaving out any it already has. Returns
@@ -1905,9 +1920,9 @@ function bindSounds() {
   });
   $("sound-import").addEventListener("click", () => $("sound-import-file").click());
   $("sound-import-file").addEventListener("change", (event) => {
-    const [file] = event.target.files;
+    const files = [...event.target.files];
     event.target.value = "";
-    if (file) importSounds(file);
+    if (files.length) importSounds(files);
   });
   $("sound-export-all").addEventListener("click", () => {
     if (!library.items.length) return;
