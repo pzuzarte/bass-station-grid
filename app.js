@@ -1370,12 +1370,22 @@ async function readPatterns() {
   }
 }
 
+// Patterns are saved in the library folder, so this asks for it first if it isn't open.
+// It's called straight from a click, as the browser only shows its folder picker then.
+async function ensureLibrary() {
+  if (library.status === "ready") return true;
+  if (library.status === "unsupported") return libraryReady();
+  setStatus("Choose the library folder, where your sounds and patterns are saved.");
+  await chooseLibraryFolder();
+  return library.status === "ready";
+}
+
 async function savePattern() {
-  if (!libraryReady()) return;
   if (!notes().length && !(slot().lanes && Object.keys(slot().lanes).length)) {
-    setStatus("This pattern is empty, so there's nothing to save.", true);
+    setStatus(`Pattern ${state.current + 1} is empty, so there's nothing to save. Add notes first.`, true);
     return;
   }
+  if (!(await ensureLibrary())) return;
   const name = SoundFolder.cleanName(window.prompt("Name this pattern", `Pattern ${state.current + 1}`) || "");
   if (!name) return;
   const fileName = SoundFolder.uniqueName(name, patterns.items.map((item) => item.name));
@@ -1389,6 +1399,18 @@ async function savePattern() {
   await readPatterns();
   renderSounds();
   setStatus(`Saved pattern ${state.current + 1} as "${fileName}" in ${PATTERNS} in "${library.folder.name}".`);
+}
+
+// Shows the saved patterns, on the Library tab.
+async function showSavedPatterns() {
+  if (!(await ensureLibrary())) return;
+  setView("sounds");
+  renderSounds();
+  $("pattern-search").scrollIntoView({ block: "center" });
+  $("pattern-search").focus();
+  setStatus(patterns.items.length
+    ? `Click Load on a pattern to put it into pattern ${state.current + 1}.`
+    : "No saved patterns yet. Save pattern, on the Grid tab, saves the one you're on.");
 }
 
 // Puts a saved pattern into the current pattern. Undo brings back what was there.
@@ -1825,6 +1847,7 @@ function renderSounds() {
 
 function bindSounds() {
   $("save-pattern").addEventListener("click", savePattern);
+  $("load-pattern").addEventListener("click", showSavedPatterns);
   $("pattern-search").addEventListener("input", (event) => {
     patterns.search = event.target.value;
     renderPatterns();

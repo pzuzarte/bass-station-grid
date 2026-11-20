@@ -52,7 +52,8 @@
     <button id="generate" type="button" title="Replaces this pattern with a new one in the key. Undo brings the old one back.">Generate</button>
     <button id="undo" type="button" disabled>Undo</button>
     <button id="duplicate" type="button" title="Copy this pattern to the next empty slot">Duplicate</button>
-    <button id="save-pattern" type="button" title="Save this pattern by name in the library folder. Saved patterns are on the Library tab.">Save pattern</button>
+    <button id="save-pattern" type="button" title="Save this pattern by name in the library folder">Save pattern</button>
+    <button id="load-pattern" type="button" title="Choose a saved pattern to load into this one">Load pattern</button>
     <button id="clear" type="button">Clear</button>
   </section>
 
@@ -299,7 +300,7 @@
       <li><b>Save current sound</b> adds the sound the Bass Station is playing to the library, under a name you choose.</li>
       <li>The <b>Sound library</b> is a folder on this computer that you choose with <b>Choose library folder</b>. Each sound is saved there as its own .syx file, named after the sound, so it's kept even if the browser's data is cleared, and your usual backups include it. Where each sound came from is kept in <b>library-info.json</b> in the same folder. After Chrome restarts, click <b>Allow library folder</b> to use it again.</li>
       <li>.syx files you put in the folder yourself show up too, if each holds one Bass Station patch.</li>
-      <li><b>Patterns</b>: <b>Save pattern</b>, next to the patterns on the Grid tab, saves the one you're on by name, with its notes, bars, knob movements and tempo. Each is a .json file in the library folder's <b>Patterns</b> folder. On the Library tab, <b>Load</b> puts a saved pattern into the pattern you're on, and Undo brings back what was there. Export MIDI still makes a .mid file for other music software.</li>
+      <li><b>Patterns</b>: <b>Save pattern</b>, next to the patterns on the Grid tab, saves the one you're on by name, asking for the library folder first if it isn't chosen yet, with its notes, bars, knob movements and tempo. Each is a .json file in the library folder's <b>Patterns</b> folder. <b>Load pattern</b> goes to the saved patterns on the Library tab, where <b>Load</b> puts one into the pattern you're on, and Undo brings back what was there. Export MIDI still makes a .mid file for other music software.</li>
       <li><b>Load</b> sends a sound to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Rename</b> and <b>Delete</b> change its file. <b>Import .syx</b> adds every patch in a file, and <b>Export all</b> downloads the whole library as one file. <b>Add to library</b> on a backup adds each of its patches.</li>
       <li>Reading patches needs MIDI with SysEx, which Chrome asks about the first time.</li>
     </ul>
