@@ -45,6 +45,7 @@ const state = {
   windowStart: 0,
   windowSpan: 0,
   undo: [],
+  redo: [],
   chain: "",
   chainOn: false,
   chainPos: 0,
@@ -160,20 +161,7 @@ function setKey(root, scale) {
 }
 
 function renderKey() {
-  const off = document.createElement("button");
-  off.type = "button";
-  off.textContent = "Off";
-  off.title = "No key: the grid shows every note, and nothing is marked as in or out of a key";
-  off.setAttribute("aria-pressed", String(state.keyOff));
-  off.addEventListener("click", () => setKeyOff(true));
-  $("roots").replaceChildren(off, ...Music.NOTE_NAMES.map((name, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = name;
-    button.setAttribute("aria-pressed", String(!state.keyOff && index === state.root));
-    button.addEventListener("click", () => setKey(index, state.scale));
-    return button;
-  }));
+  $("root").value = state.keyOff ? "off" : String(state.root);
   $("scale").value = state.keyOff ? "off" : state.scale;
   $("move-notes").checked = state.moveNotes;
   $("generate").disabled = state.keyOff;
@@ -417,22 +405,39 @@ function setBulkVelocity() {
 
 /* ---------- Undo ---------- */
 
-function remember() {
-  state.undo.push({
+// The state that Undo and Redo bring back.
+function snapshot() {
+  return {
     json: JSON.stringify({ root: state.root, scale: state.scale, keyOff: state.keyOff, slots: state.slots, current: state.current, bpm: state.bpm }),
-  });
-  if (state.undo.length > 100) state.undo.shift();
-  $("undo").disabled = false;
+  };
 }
 
-function undo() {
-  const last = state.undo.pop();
+function remember() {
+  state.undo.push(snapshot());
+  if (state.undo.length > 100) state.undo.shift();
+  state.redo = [];
+  renderUndo();
+}
+
+function renderUndo() {
+  $("undo").disabled = state.undo.length === 0;
+  $("redo").disabled = state.redo.length === 0;
+}
+
+const undo = () => stepHistory(state.undo, state.redo);
+const redo = () => stepHistory(state.redo, state.undo);
+
+// Brings back the last state from one list, keeping the current one in the other.
+function stepHistory(from, to) {
+  const last = from.pop();
   if (!last) return;
+  to.push(snapshot());
   closeNoteEditor({ restoreFocus: false });
   Object.assign(state, JSON.parse(last.json));
   renderAll();
   if (state.playing) announceTempo();
   saveSoon();
+  renderUndo();
 }
 
 /* ---------- Rendering the grid ---------- */
@@ -620,7 +625,7 @@ function renderStepControls() {
 }
 
 function renderChrome() {
-  $("undo").disabled = state.undo.length === 0;
+  renderUndo();
   renderSlots();
 }
 
@@ -1638,7 +1643,7 @@ function receivePatch(bytes) {
 
 function readyForPatches() {
   if (!state.output || !state.input) {
-    setStatus("The Bass Station isn't connected. Check the MIDI output at the bottom.", true);
+    setStatus("The Bass Station isn't connected. Check the MIDI output at the top.", true);
     return false;
   }
   if (!state.midi.sysexEnabled) {
@@ -2571,6 +2576,11 @@ function openHelp() {
 }
 
 function fillSelects() {
+  $("root").replaceChildren(new Option("Off", "off"), ...Music.NOTE_NAMES.map((name, index) => new Option(name, String(index))));
+  $("root").addEventListener("change", (event) => {
+    if (event.target.value === "off") setKeyOff(true);
+    else setKey(Number(event.target.value), state.scale);
+  });
   $("scale").replaceChildren(new Option("Off", "off"), ...Object.entries(Music.SCALES).map(
     ([id, scale]) => new Option(scale.name, id)));
   // Chords are left out, as the Bass Station plays one note at a time.
@@ -2665,6 +2675,7 @@ function bindControls() {
   $("octave-up").addEventListener("click", () => shiftOctave(1));
   $("generate").addEventListener("click", generatePattern);
   $("undo").addEventListener("click", undo);
+  $("redo").addEventListener("click", redo);
   $("duplicate").addEventListener("click", duplicatePattern);
   $("clear").addEventListener("click", () => {
     if (!notes().length) return;
@@ -2714,9 +2725,10 @@ function bindControls() {
       pasteClipboard();
     } else if (event.key === "Escape") {
       clearSelection();
-    } else if ((event.metaKey || event.ctrlKey) && event.key === "z") {
+    } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
-      undo();
+      if (event.shiftKey) redo();
+      else undo();
     } else if (event.key === "t" && !event.metaKey && !event.ctrlKey) {
       setSteps(state.baseResolution, !state.triplets);
     }
