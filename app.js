@@ -2340,6 +2340,22 @@ function renderPeers(names) {
 }
 
 // Plays together with the other grid when both are open. See sync.js.
+// What Song Grid keeps of this grid for a song: its patterns, and its sound where it has
+// one. See sync.js.
+async function collectAssets() {
+  const patterns = state.slots.map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.notes.length || (item.lanes && Object.keys(item.lanes).length))
+    .map(({ item, index }) => ({
+      id: `slot:${index}`, ref: index, label: `Pattern ${index + 1}`,
+      length: `${item.bars} bar${item.bars === 1 ? "" : "s"}`, notes: item.notes.length, data: JSON.parse(JSON.stringify(item)),
+    }));
+  // The sound the Bass Station is playing, edits included, if it can be read.
+  const canRead = state.output && state.input && state.midi?.sysexEnabled && !sounds.busy;
+  const patch = canRead ? await requestPatch() : null;
+  const sound = patch ? { label: `Patch ${BassSounds.slotOf(patch)} as the Bass Station has it`, data: { patch: Array.from(patch) } } : null;
+  return { patterns, sound };
+}
+
 const link = Sync.connect({
   name: "Bass Station Grid",
   checkbox: $("sync"),
@@ -2356,6 +2372,7 @@ const link = Sync.connect({
   },
   stop: () => stop({ fromLink: true }),
   song: (part) => { pendingSong = part; },
+  assets: collectAssets,
   songMoved(data) {
     const move = song && Sync.songMove(data, song.bars);
     if (move) song.moves.push(move);
