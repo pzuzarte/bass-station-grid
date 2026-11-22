@@ -2340,6 +2340,49 @@ function renderPeers(names) {
 }
 
 // Plays together with the other grid when both are open. See sync.js.
+// Puts the patterns kept with a song in Song Grid back into their slots, and sends its
+// sound. Undo brings back the patterns that were in those slots. See sync.js.
+const listOf = (items) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}` : items.join(""));
+
+function loadSlotAssets(assets) {
+  const slots = Sync.assetSlots(assets, SLOTS);
+  if (!slots.length) return "";
+  closeNoteEditor({ restoreFocus: false });
+  remember();
+  for (const { index, data } of slots) {
+    state.slots[index] = data;
+  }
+  if (slots.some(({ index }) => index === state.queued)) state.queued = null;
+  renderAll();
+  saveSoon();
+  const numbers = listOf(slots.map(({ index }) => index + 1));
+  return `Put ${slots.length === 1 ? `pattern ${numbers}` : `patterns ${numbers}`} in. Undo here brings back what was there.`;
+}
+
+// Tells Song Grid what was put in, and shows it here.
+function reportLoaded(parts, ok) {
+  const message = parts.filter(Boolean).join(" ") || "There was nothing to put in.";
+  setStatus(`From Song Grid: ${message}`, !ok);
+  return { ok, message };
+}
+
+async function loadAssets(assets) {
+  const patterns = loadSlotAssets(assets);
+  const patch = assets.sound?.data?.patch;
+  const valid = Array.isArray(patch) && patch.length === 154 && patch[0] === 0xF0 && patch[patch.length - 1] === 0xF7
+    && patch.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 0xFF);
+  let sound = "";
+  if (valid) {
+    if (!state.output) {
+      sound = "There's no MIDI output, so the sound wasn't sent to the Bass Station.";
+    } else {
+      await loadSound({ name: assets.sound.label || "Song sound", bytes: new Uint8Array(patch) });
+      sound = "Sent the sound to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.";
+    }
+  }
+  return reportLoaded([patterns, sound], Boolean(patterns || valid) && (!valid || Boolean(state.output)));
+}
+
 // What Song Grid keeps of this grid for a song: its patterns, and its sound where it has
 // one. See sync.js.
 async function collectAssets() {
@@ -2373,6 +2416,7 @@ const link = Sync.connect({
   stop: () => stop({ fromLink: true }),
   song: (part) => { pendingSong = part; },
   assets: collectAssets,
+  loadAssets,
   songMoved(data) {
     const move = song && Sync.songMove(data, song.bars);
     if (move) song.moves.push(move);
