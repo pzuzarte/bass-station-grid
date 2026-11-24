@@ -1951,6 +1951,27 @@ async function backUpAll() {
   setStatus(`Backed up ${patches.length - missing} patches to ${BACKUPS}/${name}.syx in "${library.folder.name}", and added ${plural(added, "new sound")} to the library. Names are the factory ones, so rename any you've changed.${gaps}`, Boolean(missing));
 }
 
+// The editor sends a whole sound as a burst of a few hundred controller messages at once,
+// and the Bass Station can miss some, leaving a mix of the old sound and the new one. This
+// spaces out anything it sends straight away, keeping the order.
+const EDITOR_GAP_MS = 1.5;
+
+function paceEditorMidi(frame) {
+  const win = frame.contentWindow;
+  if (!win || !win.MIDIOutput || win.MIDIOutput.prototype.paced) return;
+  const send = win.MIDIOutput.prototype.send;
+  let next = 0;
+  win.MIDIOutput.prototype.send = function paced(data, timestamp) {
+    if (timestamp) return send.call(this, data, timestamp);
+    const now = win.performance.now();
+    next = Math.max(next, now);
+    const at = next;
+    next += EDITOR_GAP_MS;
+    return send.call(this, data, at);
+  };
+  win.MIDIOutput.prototype.paced = true;
+}
+
 // Sends a sound by loading it into the editor, as it knows how to set every control on the synth.
 async function loadSound(item, { quiet = false } = {}) {
   const frame = $("editor-frame");
@@ -1963,6 +1984,7 @@ async function loadSound(item, { quiet = false } = {}) {
     // Gives the editor time to connect to the Bass Station.
     await new Promise((resolve) => window.setTimeout(resolve, 1500));
   }
+  paceEditorMidi(frame);
   const field = frame.contentDocument?.getElementById("patch-file");
   if (!field) {
     setStatus("The editor isn't ready yet. Open the Editor tab once, then try again.", true);
@@ -1973,6 +1995,10 @@ async function loadSound(item, { quiet = false } = {}) {
   field.files = files.files;
   field.dispatchEvent(new Event("change", { bubbles: true }));
   markLoaded(item.bytes);
+  // Knob positions the page remembered belong to the sound before, so they're forgotten,
+  // and drawn knob movements don't send them over this one.
+  state.values = {};
+  if (state.showLane) renderLane();
   // The sound brings its own arpeggiator setting, so a kept one is sent again after it.
   window.setTimeout(() => applyArp(), PATCH_SETTLE_MS * 2);
   if (!quiet) setStatus(`Sent "${item.name}" to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.`);
