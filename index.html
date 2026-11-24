@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bass Station Grid</title>
-<link rel="stylesheet" href="style.css?v=202611232320">
+<link rel="stylesheet" href="style.css?v=202611232345">
 <script>
   // Set before the page draws, so it doesn't flash the other theme.
   try { if ((localStorage.getItem("midi-grids-theme") || localStorage.getItem("bass-station-grid-theme")) === "light") document.documentElement.dataset.theme = "light"; } catch {}
@@ -59,6 +59,14 @@
 </header>
 
 <div id="grid-view" class="view">
+  <section class="bar name-bar" aria-label="This pattern's file">
+    <span class="group-label">Pattern</span>
+    <strong id="pattern-name" class="pattern-name untitled">Untitled</strong>
+    <button id="pattern-save" class="primary" type="button" title="Save this pattern to its file again, with its sound (Cmd+S). The first time, it asks where.">Save</button>
+    <button id="pattern-save-as" type="button" title="Save this pattern as a new file, choosing its name and folder (Cmd+Shift+S)">Save as&hellip;</button>
+    <button id="pattern-open" type="button" title="Open a pattern file from anywhere on this computer into this pattern">Open&hellip;</button>
+    <button id="load-pattern" type="button" title="Show the patterns saved in the library folder">Saved patterns</button>
+  </section>
   <section class="bar slots-bar" aria-label="Patterns">
     <span class="group-label">Pattern</span>
     <div id="slots" class="slots"></div>
@@ -73,8 +81,6 @@
     <button id="undo" type="button" title="Undo (Cmd+Z)" disabled>Undo</button>
     <button id="redo" type="button" title="Redo (Cmd+Shift+Z)" disabled>Redo</button>
     <button id="duplicate" type="button" title="Copy this pattern to the next empty slot">Duplicate</button>
-    <button id="save-pattern" type="button" title="Save this pattern by name in the library folder, with the sound the Bass Station is playing">Save pattern</button>
-    <button id="load-pattern" type="button" title="Choose a saved pattern to load into this one">Load pattern</button>
     <button id="clear" type="button">Clear</button>
   </section>
 
@@ -315,7 +321,7 @@
     <ul>
       <li><b>Sound</b>, beside the patterns, chooses the sound a pattern plays with. Whenever that pattern starts, on Play, when you switch to it, in a chain or from Song Grid, its sound is sent to the Bass Station: the whole sound is sent through the editor, as Load does.</li>
       <li><b>Whatever's loaded</b> sends nothing, so the pattern plays with the sound the Bass Station has at the time.</li>
-      <li>The pattern keeps its own copy of the sound, so it isn't changed by renaming or deleting the sound later. <b>Save pattern</b> saves it with the pattern, and <b>Duplicate</b> copies it.</li>
+      <li>The pattern keeps its own copy of the sound, so it isn't changed by renaming or deleting the sound later. <b>Save</b> saves it with the pattern, and <b>Duplicate</b> copies it.</li>
     </ul>
 
     <h3>Set up</h3>
@@ -342,7 +348,7 @@
       <li><b>Save current sound</b> adds the sound the Bass Station is playing to the library, under a name you choose.</li>
       <li>The <b>Sound library</b> is a folder on this computer that you choose with <b>Choose library folder</b>. Each sound is saved there as its own .syx file, named after the sound, so it's kept even if the browser's data is cleared, and your usual backups include it. Where each sound came from is kept in <b>library-info.json</b> in the same folder. After Chrome restarts, click <b>Allow library folder</b> to use it again.</li>
       <li>.syx files you put in the folder yourself show up too, if each holds one Bass Station patch.</li>
-      <li><b>Patterns</b>: <b>Save pattern</b>, next to the patterns on the Grid tab, saves the one you're on by name, asking for the library folder first if it isn't chosen yet, with its notes, bars, knob movements and tempo, and the sound the Bass Station is playing, edits included, when it can be read. That sound is also added to the sound library, named after the pattern. Each is a .json file in the library folder's <b>Patterns</b> folder. <b>Load pattern</b> goes to the saved patterns on the Library tab, where <b>Load</b> puts one into the pattern you're on and sends its sound to the Bass Station through the editor, and <b>Notes only</b> keeps the sound you have, and Undo brings back what was there. Export MIDI still makes a .mid file for other music software.</li>
+      <li><b>Patterns</b>: the bar at the top of the Grid tab shows the name of the pattern you're on, large. <b>Save</b> (Cmd+S) saves it to its file again, under the same name, with its notes, bars, knob movements and tempo, and the sound the Bass Station is playing, edits included, when it can be read, unless the pattern has its own sound. That sound is also added to the sound library, named after the pattern. The first time, and with <b>Save as&hellip;</b> (Cmd+Shift+S), the Mac's Save dialog asks for a name and a folder. It starts in the library folder's <b>Patterns</b> folder, then in wherever you saved last. <b>Open&hellip;</b> opens a pattern file from anywhere into the pattern you're on. <b>Saved patterns</b> goes to the patterns in the library folder on the Library tab, where <b>Load</b> puts one into the pattern you're on, and sends its sound to the Bass Station through the editor, and <b>Notes only</b> keeps the sound you have. A pattern you load from there or open saves back to its own file. <b>Duplicate</b> makes a copy that doesn't, so its first Save asks where. Undo brings back what was there before a load. Export MIDI still makes a .mid file for other music software.</li>
       <li>Click a sound to send it to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Rename</b> and <b>Delete</b> change its file. Click the star beside a sound to make it a favourite, and <b>Favourites</b> beside the search shows only those. Favourites are kept in library-info.json in the library folder, so they stay with your sounds. <b>Import .syx</b> adds every patch in one or more files, so a whole sound pack can be added at once by selecting all its files. Each patch is named after the name stored in it, where it has one. The same sound counts once, wherever it was stored on the Bass Station, so duplicates are left out, and any already in the library are cleared when it opens, keeping one of each, and <b>Export all</b> downloads the whole library as one file. <b>Add to library</b> on a backup adds each of its patches.</li>
       <li>Reading patches needs MIDI with SysEx, which Chrome asks about the first time.</li>
     </ul>
@@ -394,14 +400,15 @@
   </div>
 </dialog>
 
-<script src="music.js?v=202611232320"></script>
-<script src="params.js?v=202611232320"></script>
-<script src="sounds.js?v=202611232320"></script>
-<script src="folder.js?v=202611232320"></script>
-<script src="sync.js?v=202611232320"></script>
-<script src="backup.js?v=202611232320"></script>
-<script src="recorder.js?v=202611232320"></script>
-<script src="app.js?v=202611232320"></script>
+<script src="music.js?v=202611232345"></script>
+<script src="params.js?v=202611232345"></script>
+<script src="sounds.js?v=202611232345"></script>
+<script src="named-file.js?v=202611232345"></script>
+<script src="folder.js?v=202611232345"></script>
+<script src="sync.js?v=202611232345"></script>
+<script src="backup.js?v=202611232345"></script>
+<script src="recorder.js?v=202611232345"></script>
+<script src="app.js?v=202611232345"></script>
 <script>
   // The tools menu closes when you click elsewhere or press Escape.
   document.addEventListener("click", (event) => {

@@ -286,6 +286,9 @@ function duplicatePattern() {
   stop();
   remember();
   state.slots[target] = JSON.parse(JSON.stringify(slot()));
+  // The copy is a new pattern, so it doesn't save over the original's file.
+  state.slots[target].fileKey = null;
+  if (state.slots[target].name) state.slots[target].name = `${state.slots[target].name} copy`;
   switchTo(target);
   setStatus(`Copied to pattern ${target + 1}.`);
 }
@@ -705,6 +708,7 @@ function renderStepControls() {
 function renderChrome() {
   renderUndo();
   renderSlots();
+  renderPatternName();
   renderPatternSound();
   renderArp();
 }
@@ -1587,45 +1591,133 @@ async function ensureLibrary() {
   return library.status === "ready";
 }
 
-async function savePattern() {
-  if (!notes().length && !(slot().lanes && Object.keys(slot().lanes).length)) {
-    setStatus(`Pattern ${state.current + 1} is empty, so there's nothing to save. Add notes first.`, true);
-    return;
+/* ---------- Pattern files ---------- */
+
+// Patterns are saved as files with the Mac's Save dialog, anywhere, starting in the library
+// folder's Patterns folder. Each pattern remembers its file, so Save writes to it again.
+const patternFiles = NamedFile.create({
+  db: "bass-station-grid-files", id: "bass-station-grid-patterns", extension: ".json",
+  description: "Bass Station Grid pattern", mime: "application/json",
+});
+
+function renderPatternName() {
+  const name = slot().name || "";
+  const label = $("pattern-name");
+  if (!label) return;
+  label.textContent = name || "Untitled";
+  label.classList.toggle("untitled", !name);
+  label.title = name
+    ? `Pattern ${state.current + 1} is "${name}". Save writes to its file again.`
+    : `Pattern ${state.current + 1} hasn't been saved as a file yet. Save asks where to save it.`;
+}
+
+// Where the Save and Open dialogs start, the first time: the library's Patterns folder.
+async function patternsStart() {
+  if (library.status !== "ready") return undefined;
+  try {
+    return await library.folder.getDirectoryHandle(PATTERNS, { create: true });
+  } catch {
+    return undefined;
   }
-  if (!(await ensureLibrary())) return;
-  const name = SoundFolder.cleanName(window.prompt("Name this pattern", `Pattern ${state.current + 1}`) || "");
-  if (!name) return;
-  const fileName = SoundFolder.uniqueName(name, patterns.items.map((item) => item.name));
-  const data = { app: "bass-station-grid", version: 1, bars: slot().bars, bpm: currentBpm(), notes: notes(), lanes: slot().lanes || null };
-  // The sound the Bass Station is playing, edits included, if it can be read.
+}
+
+// The pattern as a file, with its sound: its own, or the Bass Station's, edits included.
+async function patternContents(index, result) {
+  const item = state.slots[index];
+  const data = { app: "bass-station-grid", version: 1, bars: item.bars, bpm: currentBpm(), notes: item.notes, lanes: item.lanes || null };
   const canRead = state.output && state.input && state.midi.sysexEnabled && !sounds.busy;
-  // A pattern with its own sound is saved with that one.
-  const patch = slot().sound ? Uint8Array.from(slot().sound.bytes) : canRead ? await requestPatch() : null;
+  const patch = item.sound ? Uint8Array.from(item.sound.bytes) : canRead ? await requestPatch() : null;
   if (patch) {
     data.sound = Array.from(patch);
-    data.soundFrom = slot().sound ? `"${slot().sound.name}", ${today()}` : `Patch ${BassSounds.slotOf(patch)}, ${today()}`;
+    data.soundFrom = item.sound ? `"${item.sound.name}", ${today()}` : `Patch ${BassSounds.slotOf(patch)}, ${today()}`;
   }
-  // The sound also goes into the sound library, named after the pattern, unless it's there.
-  let soundAdded = null;
-  if (patch && !inLibrary(patch)) {
-    try {
-      soundAdded = await library.add(fileName, patch, { from: `Pattern "${fileName}", ${data.soundFrom}` });
-    } catch {
-      soundAdded = null;
-    }
-  }
-  try {
-    await (await patternFolder()).write(fileName, new TextEncoder().encode(JSON.stringify(data, null, 1)));
-  } catch (error) {
-    setStatus(`Couldn't save it to the library folder: ${error.message}`, true);
+  result.patch = patch;
+  return new TextEncoder().encode(JSON.stringify(data, null, 1));
+}
+
+// Save writes to the pattern's file again. Save as, or Save with no file yet, asks where.
+async function savePattern({ asNew = false } = {}) {
+  const index = state.current;
+  const item = state.slots[index];
+  if (!item.notes.length && !(item.lanes && Object.keys(item.lanes).length)) {
+    setStatus(`Pattern ${index + 1} is empty, so there's nothing to save. Add notes first.`, true);
     return;
   }
-  await readPatterns();
-  renderSounds();
-  const withSound = !patch
-    ? ". The Bass Station's sound couldn't be read, so it was saved without it"
-    : soundAdded ? `, with the Bass Station's sound, which is also in the sound library as "${soundAdded}"` : ", with the Bass Station's sound, which is already in the sound library";
-  setStatus(`Saved pattern ${state.current + 1} as "${fileName}" in ${PATTERNS} in "${library.folder.name}"${withSound}.`, !patch);
+  if (!patternFiles.supported()) {
+    setStatus("Saving patterns as files needs Chrome or Edge on a computer.", true);
+    return;
+  }
+  const result = {};
+  try {
+    let saved = null;
+    if (!asNew && item.fileKey) saved = await patternFiles.save(item.fileKey, () => patternContents(index, result));
+    if (!saved) {
+      const key = NamedFile.newKey();
+      saved = await patternFiles.saveAs(key, item.name || `Pattern ${index + 1}`, () => patternContents(index, result), { startIn: await patternsStart() });
+      if (!saved) {
+        setStatus("Not saved.");
+        return;
+      }
+      item.fileKey = key;
+    }
+    item.name = saved.name;
+    // The sound also goes into the sound library, named after the pattern, unless it's there.
+    let soundAdded = null;
+    if (result.patch && library.status === "ready" && !inLibrary(result.patch)) {
+      try {
+        soundAdded = await library.add(saved.name, result.patch, { from: `Pattern "${saved.name}", ${today()}` });
+      } catch {
+        soundAdded = null;
+      }
+    }
+    saveSoon();
+    renderPatternName();
+    if (library.status === "ready") await readPatterns();
+    renderSounds();
+    const withSound = !result.patch
+      ? ". The Bass Station's sound couldn't be read, so it was saved without one"
+      : soundAdded ? `, with its sound, which is also in the sound library as "${soundAdded}"` : ", with its sound";
+    setStatus(`Saved "${saved.name}"${withSound}.`, !result.patch);
+  } catch (error) {
+    setStatus(`Couldn't save it: ${error.message}`, true);
+  }
+}
+
+// Opens a pattern file from anywhere, with the Mac's Open dialog, into the pattern you're on.
+async function openPattern() {
+  if (!patternFiles.supported()) {
+    setStatus("Opening pattern files needs Chrome or Edge on a computer.", true);
+    return;
+  }
+  const key = NamedFile.newKey();
+  try {
+    const opened = await patternFiles.open(key, { startIn: await patternsStart() });
+    if (!opened) return;
+    const pattern = readPatternFile(opened.bytes);
+    if (!pattern) {
+      await patternFiles.forget(key);
+      setStatus(`"${opened.name}" isn't a Bass Station Grid pattern.`, true);
+      return;
+    }
+    loadSavedPattern({ name: opened.name, ...pattern, fileKey: key });
+  } catch (error) {
+    setStatus(`Couldn't open it: ${error.message}`, true);
+  }
+}
+
+// Loads a pattern from the library list, remembering its file so Save writes to it.
+async function loadLibraryPattern(item, options) {
+  let fileKey = null;
+  try {
+    const folder = await patternsStart();
+    if (folder) {
+      fileKey = NamedFile.newKey();
+      await patternFiles.remember(fileKey, await folder.getFileHandle(`${item.name}.json`));
+    }
+  } catch {
+    fileKey = null;
+  }
+  loadSavedPattern({ ...item, fileKey }, options);
 }
 
 // Shows the saved patterns, on the Library tab.
@@ -1637,7 +1729,7 @@ async function showSavedPatterns() {
   $("pattern-search").focus();
   setStatus(patterns.items.length
     ? `Click Load on a pattern to put it into pattern ${state.current + 1}.`
-    : "No saved patterns yet. Save pattern, on the Grid tab, saves the one you're on.");
+    : "No saved patterns yet. Save, beside the pattern's name on the Grid tab, saves the one you're on.");
 }
 
 // Puts a saved pattern into the current pattern, and its sound on the Bass Station unless
@@ -1646,7 +1738,7 @@ function loadSavedPattern(item, { notesOnly = false } = {}) {
   stop();
   closeNoteEditor({ restoreFocus: false });
   remember();
-  state.slots[state.current] = { bars: item.bars, notes: JSON.parse(JSON.stringify(item.notes)) };
+  state.slots[state.current] = { bars: item.bars, notes: JSON.parse(JSON.stringify(item.notes)), name: item.name, fileKey: item.fileKey || null };
   if (item.lanes) state.slots[state.current].lanes = JSON.parse(JSON.stringify(item.lanes));
   if (item.sound && !notesOnly) state.slots[state.current].sound = { name: item.name, bytes: Array.from(item.sound) };
   if (item.bpm) state.bpm = item.bpm;
@@ -1675,7 +1767,7 @@ function renderPatterns() {
     ? "Patterns are saved in the library folder too. Choose it under Sound library."
     : patterns.items.length
       ? "No saved patterns match that search."
-      : "No saved patterns yet. Save pattern, next to the patterns on the Grid tab, saves the one you're on.";
+      : "No saved patterns yet. Save, beside the pattern's name on the Grid tab, saves the one you're on, and Save as asks where.";
   $("pattern-list").replaceChildren(...shown.map((item) => {
     const row = document.createElement("li");
     row.className = "sound-row";
@@ -1688,8 +1780,8 @@ function renderPatterns() {
     text.append(about);
     const buttons = [actionButton("Load", item.sound
       ? `Put it into pattern ${state.current + 1} on the Grid tab, and send its sound to the Bass Station`
-      : `Put it into pattern ${state.current + 1} on the Grid tab`, () => loadSavedPattern(item))];
-    if (item.sound) buttons.push(actionButton("Notes only", `Put it into pattern ${state.current + 1}, keeping the sound the Bass Station has now`, () => loadSavedPattern(item, { notesOnly: true })));
+      : `Put it into pattern ${state.current + 1} on the Grid tab`, () => loadLibraryPattern(item))];
+    if (item.sound) buttons.push(actionButton("Notes only", `Put it into pattern ${state.current + 1}, keeping the sound the Bass Station has now`, () => loadLibraryPattern(item, { notesOnly: true })));
     row.append(text, ...buttons,
       actionButton("Rename", "Rename this pattern and its file", async () => {
         const name = SoundFolder.cleanName(window.prompt("Rename this pattern", item.name) || "");
@@ -2234,7 +2326,9 @@ function renderSounds() {
 }
 
 function bindSounds() {
-  $("save-pattern").addEventListener("click", savePattern);
+  $("pattern-save").addEventListener("click", () => savePattern());
+  $("pattern-save-as").addEventListener("click", () => savePattern({ asNew: true }));
+  $("pattern-open").addEventListener("click", openPattern);
   $("load-pattern").addEventListener("click", showSavedPatterns);
   $("pattern-search").addEventListener("input", (event) => {
     patterns.search = event.target.value;
@@ -3234,6 +3328,12 @@ function bindControls() {
     }
     if (event.key === "Escape" && state.editor) {
       closeNoteEditor();
+      return;
+    }
+    // Cmd+S saves the pattern to its file, and Cmd+Shift+S saves it as a new one.
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      if (!event.repeat) savePattern({ asNew: event.shiftKey });
       return;
     }
     // Space is the transport wherever you've last clicked, unless you're writing text.

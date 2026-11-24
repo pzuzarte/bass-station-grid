@@ -343,3 +343,8 @@ header.bar { gap: 6px 10px; }
 .slot-button.chosen { color: var(--accent-text); background: var(--accent); border-color: var(--accent); font-weight: 700; }
 .slot-button.chosen span { color: var(--accent-text); }
 .arp-choice select { margin-left: 4px; }
+
+/* The name of the pattern, shown large so it's clear which one is loaded. */
+.name-bar { align-items: center; }
+.pattern-name { min-width: 0; max-width: 40ch; overflow: hidden; font-size: 20px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.pattern-name.untitled { color: var(--muted); font-weight: 400; font-style: italic; }
