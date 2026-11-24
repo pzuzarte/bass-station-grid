@@ -237,6 +237,8 @@ function switchTo(index) {
 function sendPatternSound() {
   const sound = slot().sound;
   if (!sound || !state.output) return;
+  // Already on the Bass Station, perhaps with knob changes made since, so it's left as it is.
+  if (state.loadedSound && BassSounds.sameSound(state.loadedSound, sound.bytes)) return;
   loadSound({ name: sound.name, bytes: Uint8Array.from(sound.bytes) }, { quiet: true })
     .catch((error) => setStatus(`Couldn't send pattern ${state.current + 1}'s sound: ${error.message}`, true));
 }
@@ -1312,6 +1314,8 @@ function handleMidiInput(event, port) {
   // setting is sent again once the patch has loaded.
   if ((status & 0x0F) === state.channel && (status & 0xF0) === 0xC0) {
     state.chosenSlot = first;
+    // Another patch now, so a pattern's sound is sent again when it next starts.
+    state.loadedSound = null;
     renderSounds();
     window.setTimeout(() => applyArp(), PATCH_SETTLE_MS);
     return;
@@ -2065,7 +2069,32 @@ function paceEditorMidi(frame) {
 }
 
 // Sends a sound by loading it into the editor, as it knows how to set every control on the synth.
+// A saved sound keeps the number of the patch it was read from. If that patch on the Bass
+// Station still has the same sound, choosing it there gives exactly that sound, which the
+// editor can't always rebuild from its settings. Nothing is written to the Bass Station.
+async function loadFromMemory(item) {
+  if (!state.output || !state.input || !state.midi?.sysexEnabled || sounds.busy) return false;
+  const bytes = Array.from(item.bytes);
+  const number = BassSounds.slotOf(bytes);
+  if (!Number.isInteger(number) || number < 0 || number >= BassSounds.SLOTS) return false;
+  try {
+    const patch = await selectSlot(number);
+    if (!patch || !BassSounds.sameSound(patch, bytes)) return false;
+    state.chosenSlot = number;
+    state.values = {};
+    markLoaded(patch);
+    applyArp();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function loadSound(item, { quiet = false } = {}) {
+  if (await loadFromMemory(item)) {
+    if (!quiet) setStatus(`Chose "${item.name}" from patch ${state.chosenSlot} on the Bass Station, where it's stored.`);
+    return;
+  }
   const frame = $("editor-frame");
   if (!frame.getAttribute("src")) {
     shareEditorSettings();
