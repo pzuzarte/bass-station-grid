@@ -1922,7 +1922,7 @@ async function requestPatch() {
   return arriving;
 }
 
-async function selectSlot(slot) {
+async function selectPatch(slot) {
   if (!state.output) {
     setStatus("No MIDI output connected.", true);
     return null;
@@ -1930,7 +1930,15 @@ async function selectSlot(slot) {
   state.output.send([0xC0 | state.channel, slot]);
   await pause(PATCH_SETTLE_MS);
   // Asking for the patch also brings the editor up to date, as it hears the reply too.
-  return state.midi.sysexEnabled && state.input ? requestPatch() : null;
+  if (!state.midi.sysexEnabled || !state.input) return null;
+  // The Bass Station can still be changing patch, and then sends the one before. Each patch
+  // says which it is, so it's asked again, a little later, until it's the one chosen.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const patch = await requestPatch();
+    if (!patch || BassSounds.slotOf(patch) === slot) return patch;
+    await pause(PATCH_SETTLE_MS * (attempt + 1));
+  }
+  return null;
 }
 
 // Remembers the sound the Bass Station has now, so the library marks it, or forgets it.
@@ -1979,7 +1987,7 @@ async function chooseSlot(slot) {
   if (sounds.busy) return;
   state.chosenSlot = slot;
   renderSounds();
-  const patch = await selectSlot(slot);
+  const patch = await selectPatch(slot);
   applyArp();
   markLoaded(patch);
   if (patch) useForPattern(`${slot} ${BassSounds.factoryName(slot)}`, patch);
@@ -2022,7 +2030,7 @@ async function backUpAll() {
   let missing = 0;
   for (let slot = 0; slot < BassSounds.SLOTS && !job.cancelled; slot += 1) {
     setStatus(`Backing up patch ${slot + 1} of ${BassSounds.SLOTS}...`);
-    let patch = await selectSlot(slot);
+    let patch = await selectPatch(slot);
     if (!patch) patch = await requestPatch();
     if (patch) patches.push(patch);
     else {
@@ -2030,7 +2038,7 @@ async function backUpAll() {
       missing += 1;
     }
   }
-  if (start) await selectSlot(BassSounds.slotOf(start));
+  if (start) await selectPatch(BassSounds.slotOf(start));
   sounds.busy = null;
   $("backup-all").textContent = "Back up all 128";
   if (job.cancelled) {
@@ -2087,7 +2095,7 @@ async function loadFromMemory(item) {
   const number = BassSounds.slotOf(bytes);
   if (!Number.isInteger(number) || number < 0 || number >= BassSounds.SLOTS) return false;
   try {
-    const patch = await selectSlot(number);
+    const patch = await selectPatch(number);
     if (!patch || !BassSounds.sameSound(patch, bytes)) return false;
     state.chosenSlot = number;
     state.values = {};
