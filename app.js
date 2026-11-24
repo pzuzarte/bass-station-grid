@@ -214,13 +214,61 @@ function selectSlot(index) {
   }
 }
 
-// The sound stays as it is, so only loading a patch or a saved sound changes it.
+// A pattern with a sound sends it as it starts. Without one, the sound stays as it is.
 function switchTo(index) {
   restoreAfterMotions();
   state.current = index;
   state.queued = null;
   state.page = 0;
   renderAll();
+  saveSoon();
+  sendPatternSound();
+}
+
+/* ---------- A sound for each pattern ---------- */
+
+// The pattern keeps its own copy of the sound, so renaming or deleting it in the
+// library doesn't change the pattern.
+function sendPatternSound() {
+  const sound = slot().sound;
+  if (!sound || !state.output) return;
+  loadSound({ name: sound.name, bytes: Uint8Array.from(sound.bytes) }, { quiet: true })
+    .catch((error) => setStatus(`Couldn't send pattern ${state.current + 1}'s sound: ${error.message}`, true));
+}
+
+function renderPatternSound() {
+  const select = $("pattern-sound");
+  if (!select) return;
+  const sound = slot().sound;
+  const options = [new Option("Whatever's loaded", "")];
+  const items = library.status === "ready" ? library.items : [];
+  const match = sound ? items.findIndex((item) => BassSounds.sameSound(item.bytes, Uint8Array.from(sound.bytes))) : -1;
+  if (sound && match < 0) options.push(new Option(`${sound.name} (kept with the pattern)`, "kept"));
+  for (const [index, item] of items.entries()) options.push(new Option(item.name, String(index)));
+  select.replaceChildren(...options);
+  select.value = !sound ? "" : match >= 0 ? String(match) : "kept";
+  select.title = sound ? `Pattern ${state.current + 1} plays with "${sound.name}"` : `Pattern ${state.current + 1} plays with whatever sound is loaded`;
+}
+
+function choosePatternSound(value) {
+  if (value === "kept") return;
+  if (value === "") {
+    slot().sound = null;
+    setStatus(`Pattern ${state.current + 1} now plays with whatever sound is loaded.`);
+  } else {
+    const item = library.items[Number(value)];
+    if (!item) return;
+    slot().sound = { name: item.name, bytes: Array.from(item.bytes) };
+    if (state.output) {
+      setStatus(`Pattern ${state.current + 1} now plays with "${item.name}". Sending it to the Bass Station...`);
+      loadSound(item, { quiet: true })
+        .then(() => setStatus(`Pattern ${state.current + 1} now plays with "${item.name}", and it's been sent to the Bass Station.`))
+        .catch((error) => setStatus(`Couldn't send "${item.name}": ${error.message}`, true));
+    } else {
+      setStatus(`Pattern ${state.current + 1} now plays with "${item.name}". It's sent once the Bass Station is connected and the pattern starts.`, true);
+    }
+  }
+  renderPatternSound();
   saveSoon();
 }
 
@@ -627,6 +675,7 @@ function renderStepControls() {
 function renderChrome() {
   renderUndo();
   renderSlots();
+  renderPatternSound();
 }
 
 // Imported or restored patterns can be any number of steps, such as 6 or 12.
@@ -1434,10 +1483,11 @@ async function savePattern() {
   const data = { app: "bass-station-grid", version: 1, bars: slot().bars, bpm: currentBpm(), notes: notes(), lanes: slot().lanes || null };
   // The sound the Bass Station is playing, edits included, if it can be read.
   const canRead = state.output && state.input && state.midi.sysexEnabled && !sounds.busy;
-  const patch = canRead ? await requestPatch() : null;
+  // A pattern with its own sound is saved with that one.
+  const patch = slot().sound ? Uint8Array.from(slot().sound.bytes) : canRead ? await requestPatch() : null;
   if (patch) {
     data.sound = Array.from(patch);
-    data.soundFrom = `Patch ${BassSounds.slotOf(patch)}, ${today()}`;
+    data.soundFrom = slot().sound ? `"${slot().sound.name}", ${today()}` : `Patch ${BassSounds.slotOf(patch)}, ${today()}`;
   }
   // The sound also goes into the sound library, named after the pattern, unless it's there.
   let soundAdded = null;
@@ -1482,6 +1532,7 @@ function loadSavedPattern(item, { notesOnly = false } = {}) {
   remember();
   state.slots[state.current] = { bars: item.bars, notes: JSON.parse(JSON.stringify(item.notes)) };
   if (item.lanes) state.slots[state.current].lanes = JSON.parse(JSON.stringify(item.lanes));
+  if (item.sound && !notesOnly) state.slots[state.current].sound = { name: item.name, bytes: Array.from(item.sound) };
   if (item.bpm) state.bpm = item.bpm;
   if (item.notes.length) {
     const lowest = Math.min(...item.notes.map((n) => n.note));
@@ -1773,7 +1824,7 @@ async function backUpAll() {
 }
 
 // Sends a sound by loading it into the editor, as it knows how to set every control on the synth.
-async function loadSound(item) {
+async function loadSound(item, { quiet = false } = {}) {
   const frame = $("editor-frame");
   if (!frame.getAttribute("src")) {
     shareEditorSettings();
@@ -1794,7 +1845,7 @@ async function loadSound(item) {
   field.files = files.files;
   field.dispatchEvent(new Event("change", { bubbles: true }));
   markLoaded(item.bytes);
-  setStatus(`Sent "${item.name}" to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.`);
+  if (!quiet) setStatus(`Sent "${item.name}" to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.`);
 }
 
 function download(name, bytes) {
@@ -1896,6 +1947,7 @@ function actionButton(label, title, onClick) {
 
 function renderSounds() {
   renderPatterns();
+  renderPatternSound();
   $("slot-list").replaceChildren(...Array.from({ length: BassSounds.SLOTS }, (_, slot) => {
     const item = document.createElement("li");
     const button = actionButton(`${slot}`, "Choose this patch on the Bass Station", () => chooseSlot(slot));
@@ -2520,10 +2572,12 @@ function play({ startAt = null, fromLink = false } = {}) {
   state.playing = true;
   state.nextPulse = 0;
   const chain = song ? [] : chainList();
+  const switching = chain.length > 0 && state.current !== chain[0];
   if (chain.length) {
     state.chainPos = 0;
-    if (state.current !== chain[0]) switchTo(chain[0]);
+    if (switching) switchTo(chain[0]);
   }
+  if (!switching) sendPatternSound();
   const shared = fromLink ? null : link.announcePlay(currentBpm());
   state.nextTime = startAt ?? shared ?? performance.now() + 60;
   if (sendingClock()) state.output.send([0xFA], state.nextTime);
@@ -2688,12 +2742,13 @@ async function importMidi(file) {
   setStatus(`Imported ${count} from ${file.name} into pattern ${state.current + 1}. Undo brings the old one back.${cut}${guess}`);
 }
 
-const THEME_KEY = "bass-station-grid-theme";
+// Shared by all the grids, so switching one switches them all.
+const THEME_KEY = "midi-grids-theme";
 
 function setTheme(theme) {
   if (theme === "light") document.documentElement.dataset.theme = "light";
   else delete document.documentElement.dataset.theme;
-  $("theme-toggle").textContent = theme === "light" ? "Dark mode" : "Light mode";
+  $("theme-toggle").textContent = theme === "light" ? "☾" : "☀";
   try {
     localStorage.setItem(THEME_KEY, theme);
   } catch {
@@ -2701,6 +2756,11 @@ function setTheme(theme) {
   }
   renderLane();
 }
+
+// Follows a switch made on another grid open in this browser.
+window.addEventListener("storage", (event) => {
+  if (event.key === THEME_KEY && event.newValue) setTheme(event.newValue === "light" ? "light" : "dark");
+});
 
 /* ---------- Controls ---------- */
 
@@ -2805,13 +2865,14 @@ function bindControls() {
     if (file) restoreBackup(file);
   });
   $("theme-toggle").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
-  $("theme-toggle").textContent = document.documentElement.dataset.theme === "light" ? "Dark mode" : "Light mode";
+  $("theme-toggle").textContent = document.documentElement.dataset.theme === "light" ? "☾" : "☀";
   $("octave-down").addEventListener("click", () => shiftOctave(-1));
   $("octave-up").addEventListener("click", () => shiftOctave(1));
   $("generate").addEventListener("click", generatePattern);
   $("undo").addEventListener("click", undo);
   $("redo").addEventListener("click", redo);
   $("duplicate").addEventListener("click", duplicatePattern);
+  $("pattern-sound").addEventListener("change", (event) => choosePatternSound(event.target.value));
   $("clear").addEventListener("click", () => {
     if (!notes().length) return;
     remember();
