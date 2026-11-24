@@ -33,6 +33,10 @@ const state = {
   span: 2,
   showAll: false,
   favouritesOnly: false, // The Sound library shows only favourites.
+  slotFavourites: [], // Patches on the Bass Station marked as favourites.
+  slotFavouritesOnly: false,
+  chosenSlot: null, // The patch last chosen, highlighted in the list.
+  arp: "patch", // The arpeggiator: as each patch has it, or kept "off" or "on".
   loadedSound: null, // The sound last sent to or chosen on the Bass Station, as bytes, to mark it in the library.
   keyOff: false, // No key: every note shows, and nothing is marked as in or out of it.
   baseResolution: 240,
@@ -87,6 +91,7 @@ function saveSoon() {
     const saved = {};
     for (const key of ["root", "scale", "moveNotes", "slots", "current", "bpm", "channel",
       "newLength", "lowOctave", "span", "showAll", "keyOff", "loadedSound", "favouritesOnly", "baseResolution", "triplets", "view",
+      "slotFavourites", "slotFavouritesOnly", "chosenSlot", "arp",
       "chain", "chainOn", "showLane", "laneParam"]) {
       saved[key] = state[key];
     }
@@ -701,6 +706,7 @@ function renderChrome() {
   renderUndo();
   renderSlots();
   renderPatternSound();
+  renderArp();
 }
 
 // Imported or restored patterns can be any number of steps, such as 6 or 12.
@@ -1298,6 +1304,14 @@ function handleMidiInput(event, port) {
     return;
   }
   const [status, first, second] = event.data;
+  // A patch chosen on the Bass Station brings its own arpeggiator setting, so a kept
+  // setting is sent again once the patch has loaded.
+  if ((status & 0x0F) === state.channel && (status & 0xF0) === 0xC0) {
+    state.chosenSlot = first;
+    renderSounds();
+    window.setTimeout(() => applyArp(), PATCH_SETTLE_MS);
+    return;
+  }
   if ((status & 0x0F) !== state.channel || (status & 0xF0) !== 0xB0) return;
   const param = BassParams.BY_CC.get(first);
   if (!param) return;
@@ -1848,9 +1862,21 @@ async function toggleFavourite(item) {
 
 const isLoaded = (item) => Boolean(state.loadedSound) && BassSounds.sameSound(item.bytes, state.loadedSound);
 
+function toggleSlotFavourite(slot) {
+  const favourites = new Set(state.slotFavourites);
+  if (favourites.has(slot)) favourites.delete(slot);
+  else favourites.add(slot);
+  state.slotFavourites = [...favourites].sort((a, b) => a - b);
+  saveSoon();
+  renderSounds();
+}
+
 async function chooseSlot(slot) {
   if (sounds.busy) return;
+  state.chosenSlot = slot;
+  renderSounds();
   const patch = await selectSlot(slot);
+  applyArp();
   markLoaded(patch);
   setStatus(`Chose patch ${slot}${slot < BassSounds.FACTORY.length ? `, "${BassSounds.factoryName(slot)}" from the factory` : ""}.${patch ? "" : " The editor updates once it hears the patch."}`);
 }
@@ -1947,6 +1973,8 @@ async function loadSound(item, { quiet = false } = {}) {
   field.files = files.files;
   field.dispatchEvent(new Event("change", { bubbles: true }));
   markLoaded(item.bytes);
+  // The sound brings its own arpeggiator setting, so a kept one is sent again after it.
+  window.setTimeout(() => applyArp(), PATCH_SETTLE_MS * 2);
   if (!quiet) setStatus(`Sent "${item.name}" to the Bass Station through the editor. Save it on the Bass Station to keep it in a patch slot.`);
 }
 
@@ -2050,16 +2078,35 @@ function actionButton(label, title, onClick) {
 function renderSounds() {
   renderPatterns();
   renderPatternSound();
-  $("slot-list").replaceChildren(...Array.from({ length: BassSounds.SLOTS }, (_, slot) => {
+  const favourites = new Set(state.slotFavourites);
+  const shownSlots = Array.from({ length: BassSounds.SLOTS }, (_, slot) => slot)
+    .filter((slot) => !state.slotFavouritesOnly || favourites.has(slot));
+  $("slot-favourites-only").setAttribute("aria-pressed", String(state.slotFavouritesOnly));
+  const rows = shownSlots.map((slot) => {
     const item = document.createElement("li");
+    item.className = "slot-row";
     const button = actionButton(`${slot}`, "Choose this patch on the Bass Station", () => chooseSlot(slot));
     button.className = "slot-button";
+    button.classList.toggle("chosen", slot === state.chosenSlot);
+    button.setAttribute("aria-pressed", String(slot === state.chosenSlot));
     const name = document.createElement("span");
     name.textContent = BassSounds.factoryName(slot);
     button.append(name);
-    item.append(button);
+    const star = actionButton(favourites.has(slot) ? "\u2605" : "\u2606",
+      favourites.has(slot) ? "Remove from favourites" : "Add to favourites", () => toggleSlotFavourite(slot));
+    star.className = "favourite";
+    star.setAttribute("aria-pressed", String(favourites.has(slot)));
+    star.setAttribute("aria-label", `Favourite patch ${slot}`);
+    item.append(button, star);
     return item;
-  }));
+  });
+  if (!rows.length) {
+    const empty = document.createElement("li");
+    empty.className = "sounds-note";
+    empty.textContent = "No favourite patches yet. Click the star beside a patch to add it.";
+    rows.push(empty);
+  }
+  $("slot-list").replaceChildren(...rows);
 
   const ready = library.status === "ready";
   const folderState = {
@@ -2195,10 +2242,75 @@ function bindSounds() {
 
 const ticker = new Worker(URL.createObjectURL(new Blob(
   ["setInterval(() => postMessage(0), 25);"], { type: "text/javascript" })));
-ticker.onmessage = () => { if (state.playing) schedule(); };
+ticker.onmessage = () => {
+  if (state.playing) {
+    idleClock.next = null;
+    schedule();
+  } else {
+    sendIdleClock();
+  }
+};
 
 const msPerPulse = () => 60000 / (currentBpm() * PPQ);
 const sendingClock = () => $("clock").checked;
+
+/* ---------- The arpeggiator ---------- */
+
+const ARP_CC = 108;
+const ARP_MODES = [["patch", "As the patch"], ["off", "Off"], ["on", "On"]];
+// The arpeggiator follows MIDI clock, so unless it's kept off it gets the grid's tempo.
+const arpClock = () => state.arp !== "off";
+
+function renderArp() {
+  for (const select of document.querySelectorAll(".arp-mode")) {
+    if (!select.options.length) select.replaceChildren(...ARP_MODES.map(([value, label]) => new Option(label, value)));
+    select.value = state.arp;
+  }
+}
+
+// Sets the arpeggiator as chosen, as a patch change brings back the patch's own setting.
+function applyArp(atTime) {
+  if (state.arp === "patch" || !state.output) return;
+  const value = state.arp === "on" ? 127 : 0;
+  state.values["arp.on"] = value;
+  sendController(ARP_CC, value, atTime);
+}
+
+function chooseArp(mode) {
+  state.arp = mode;
+  renderArp();
+  saveSoon();
+  applyArp();
+  idleClock.next = null;
+  const messages = {
+    patch: "The arpeggiator now follows each patch. It keeps time with the grid's tempo.",
+    off: "The arpeggiator is off, and stays off when the patch changes.",
+    on: "The arpeggiator is on, in time with the grid's tempo, and stays on when the patch changes.",
+  };
+  setStatus(state.output ? messages[mode] : `${messages[mode]} No MIDI output is connected yet.`, !state.output);
+}
+
+// While stopped, clock is sent at the grid's tempo so the arpeggiator keeps time. It's only
+// timing clock, without start or stop, so the Bass Station's own sequencer doesn't start.
+const idleClock = { next: null };
+
+function sendIdleClock() {
+  if (!arpClock() || !state.output) {
+    idleClock.next = null;
+    return;
+  }
+  const now = performance.now();
+  const interval = 60000 / (currentBpm() * 24);
+  if (idleClock.next === null || idleClock.next < now - interval * 4) idleClock.next = now;
+  try {
+    while (idleClock.next < now + SCHEDULE_AHEAD_MS) {
+      state.output.send([0xF8], idleClock.next);
+      idleClock.next += interval;
+    }
+  } catch {
+    idleClock.next = null;
+  }
+}
 
 function currentBpm() {
   const value = Number($("bpm").value);
@@ -2281,7 +2393,7 @@ function schedule() {
     const playing = song?.muted ? { notes: [], bars: slot().bars } : slot();
     const from = state.nextPulse;
     const to = from + CHUNK_PULSES;
-    if (sendingClock() && from % CLOCK_PULSES === 0 && state.output) {
+    if ((sendingClock() || arpClock()) && from % CLOCK_PULSES === 0 && state.output) {
       state.output.send([0xF8], state.nextTime);
     }
     if (from % PPQ === 0 && !state.sendOnce) click.at(state.nextTime, from % (4 * PPQ) === 0);
@@ -3060,6 +3172,15 @@ function bindControls() {
   $("redo").addEventListener("click", redo);
   $("duplicate").addEventListener("click", duplicatePattern);
   $("pattern-sound").addEventListener("change", (event) => choosePatternSound(event.target.value));
+  for (const select of document.querySelectorAll(".arp-mode")) {
+    select.addEventListener("change", (event) => chooseArp(event.target.value));
+  }
+  renderArp();
+  $("slot-favourites-only").addEventListener("click", () => {
+    state.slotFavouritesOnly = !state.slotFavouritesOnly;
+    saveSoon();
+    renderSounds();
+  });
   $("clear").addEventListener("click", () => {
     if (!notes().length) return;
     remember();

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bass Station Grid</title>
-<link rel="stylesheet" href="style.css?v=202611232300">
+<link rel="stylesheet" href="style.css?v=202611232306">
 <script>
   // Set before the page draws, so it doesn't flash the other theme.
   try { if ((localStorage.getItem("midi-grids-theme") || localStorage.getItem("bass-station-grid-theme")) === "light") document.documentElement.dataset.theme = "light"; } catch {}
@@ -91,6 +91,9 @@
   <label class="check" title="Sends MIDI clock, start and stop with playback. The Bass Station's arpeggiator and sequencer follow it.">
     <input id="clock" type="checkbox"> Send clock
   </label>
+    <label class="arp-choice" title="As the patch leaves the arpeggiator as each patch has it. Off or On sets it, and sets it again whenever the patch changes. Unless it's Off, the Bass Station gets the grid's tempo, so the arpeggiator plays in time.">Arp
+      <select class="arp-mode" aria-label="Arpeggiator"></select>
+    </label>
   <button id="click" class="toggle" type="button" aria-pressed="false" title="A metronome click on each beat while the pattern plays, louder on the first beat of each bar. It plays from this computer, not the instrument.">Click</button>
   <span class="divider" aria-hidden="true"></span>
     <label>Bars
@@ -205,6 +208,10 @@
     <section class="sounds-card" aria-labelledby="slots-title">
       <div class="sounds-head">
         <h2 id="slots-title">On the Bass Station</h2>
+        <button id="slot-favourites-only" class="toggle" type="button" aria-pressed="false" title="Show only your favourite patches">&#9733; Favourites</button>
+        <label class="arp-choice" title="As the patch leaves the arpeggiator as each patch has it. Off or On sets it, and sets it again whenever the patch changes. Unless it's Off, the Bass Station gets the grid's tempo, so the arpeggiator plays in time.">Arpeggiator
+          <select class="arp-mode" aria-label="Arpeggiator"></select>
+        </label>
         <div class="spacer"></div>
         <button id="save-current" type="button" title="Ask the Bass Station for the sound it's playing, and add it to the library">Save current sound</button>
         <button id="backup-all" class="primary" type="button" title="Read all 128 patches from the Bass Station, keep them as a backup, and add each to the sound library">Back up all 128</button>
@@ -330,6 +337,8 @@
     <ul>
       <li><b>On the Bass Station</b> lists its 128 patches with their factory names, from Novation's patch sheet. Click one to choose it on the synth, and the Editor tab follows. The names are only the factory ones, as the Bass Station doesn't store names, so any you've overwritten still show the factory name.</li>
       <li><b>Back up all 128</b> steps the Bass Station through every patch, reads each one, and goes back to the patch you were on. Each patch is also added to the sound library, named after its factory patch, unless the library already has it, so every sound on your Bass Station can be loaded from there. It takes about half a minute. Unsaved changes to the current sound are lost, so save first. The backup is saved as one .syx file in the library folder's <b>Backups</b> folder, which other Bass Station tools can read too.</li>
+      <li>The patch you chose is highlighted. Click the star beside a patch to make it a favourite, and <b>Favourites</b> beside the title shows only those. These favourites are kept in this browser.</li>
+      <li><b>Arpeggiator</b>, here and as <b>Arp</b> on the Grid tab, is one setting. <b>As the patch</b> leaves the arpeggiator as each patch has it. <b>Off</b> turns it off, and <b>On</b> turns it on, and either is sent again whenever the patch changes, on the Bass Station or from this page, so a patch with its arpeggiator on doesn't switch it back. Unless it's Off, the page sends the Bass Station MIDI clock at the grid's tempo, playing or stopped, so the arpeggiator keeps time with the grid. It doesn't start the Bass Station's own sequencer, which only Send clock does.</li>
       <li><b>Save current sound</b> adds the sound the Bass Station is playing to the library, under a name you choose.</li>
       <li>The <b>Sound library</b> is a folder on this computer that you choose with <b>Choose library folder</b>. Each sound is saved there as its own .syx file, named after the sound, so it's kept even if the browser's data is cleared, and your usual backups include it. Where each sound came from is kept in <b>library-info.json</b> in the same folder. After Chrome restarts, click <b>Allow library folder</b> to use it again.</li>
       <li>.syx files you put in the folder yourself show up too, if each holds one Bass Station patch.</li>
@@ -385,14 +394,14 @@
   </div>
 </dialog>
 
-<script src="music.js?v=202611232300"></script>
-<script src="params.js?v=202611232300"></script>
-<script src="sounds.js?v=202611232300"></script>
-<script src="folder.js?v=202611232300"></script>
-<script src="sync.js?v=202611232300"></script>
-<script src="backup.js?v=202611232300"></script>
-<script src="recorder.js?v=202611232300"></script>
-<script src="app.js?v=202611232300"></script>
+<script src="music.js?v=202611232306"></script>
+<script src="params.js?v=202611232306"></script>
+<script src="sounds.js?v=202611232306"></script>
+<script src="folder.js?v=202611232306"></script>
+<script src="sync.js?v=202611232306"></script>
+<script src="backup.js?v=202611232306"></script>
+<script src="recorder.js?v=202611232306"></script>
+<script src="app.js?v=202611232306"></script>
 <script>
   // The tools menu closes when you click elsewhere or press Escape.
   document.addEventListener("click", (event) => {

@@ -336,3 +336,10 @@ header.bar { gap: 6px 10px; }
 
 /* The end of a note that crosses the end of the pattern, shown at its start. */
 .note-bar.wrapped { opacity: 0.6; border-left: 2px dashed rgba(255, 255, 255, 0.7); }
+
+/* The patch last chosen on the Bass Station. */
+.slot-row { display: flex; gap: 2px; align-items: center; }
+.slot-row .slot-button { flex: 1; min-width: 0; }
+.slot-button.chosen { color: var(--accent-text); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.slot-button.chosen span { color: var(--accent-text); }
+.arp-choice select { margin-left: 4px; }
