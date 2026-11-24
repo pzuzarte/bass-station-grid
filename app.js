@@ -1967,6 +1967,14 @@ function toggleSlotFavourite(slot) {
   renderSounds();
 }
 
+// A sound chosen on the Library tab becomes the current pattern's sound too, as with
+// its Sound menu, so it comes back when the pattern is loaded or switched to.
+function useForPattern(name, bytes) {
+  slot().sound = { name, bytes: Array.from(bytes) };
+  saveSoon();
+  renderPatternSound();
+}
+
 async function chooseSlot(slot) {
   if (sounds.busy) return;
   state.chosenSlot = slot;
@@ -1974,7 +1982,8 @@ async function chooseSlot(slot) {
   const patch = await selectSlot(slot);
   applyArp();
   markLoaded(patch);
-  setStatus(`Chose patch ${slot}${slot < BassSounds.FACTORY.length ? `, "${BassSounds.factoryName(slot)}" from the factory` : ""}.${patch ? "" : " The editor updates once it hears the patch."}`);
+  if (patch) useForPattern(`${slot} ${BassSounds.factoryName(slot)}`, patch);
+  setStatus(`Chose patch ${slot}${slot < BassSounds.FACTORY.length ? `, "${BassSounds.factoryName(slot)}" from the factory` : ""}${patch ? `, as pattern ${state.current + 1}'s sound` : ""}.${patch ? " Save keeps it with the pattern." : " The patch couldn't be read, so pattern " + (state.current + 1) + "'s sound wasn't changed."}`);
 }
 
 async function saveCurrentSound() {
@@ -2303,6 +2312,7 @@ function renderSounds() {
     text.append(from);
     row.addEventListener("click", (event) => {
       if (event.target.closest("button") && !event.target.closest(".sound-name")) return;
+      useForPattern(item.name, item.bytes);
       loadSound(item);
     });
     row.append(star, text,
