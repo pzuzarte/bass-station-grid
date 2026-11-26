@@ -1823,7 +1823,7 @@ function renderPatterns() {
   const shown = ready ? patterns.items.filter((item) => words.every((word) => item.name.toLowerCase().includes(word))) : [];
   $("patterns-empty").hidden = ready && shown.length > 0;
   $("patterns-empty").textContent = !ready
-    ? "Patterns are saved in the library folder too. Choose it under Sound library."
+    ? "Patterns are saved in the library folder too. Click Choose library folder, beside Save."
     : patterns.items.length
       ? "No saved patterns match that search."
       : "No saved patterns yet. Save, beside the pattern's name on the Grid tab, saves the one you're on, and Save as asks where.";
@@ -2335,8 +2335,7 @@ function renderSounds() {
     missing: ["Choose library folder", `Couldn't read "${library.folder?.name}". Choose it again.`],
     ready: ["Change folder", ""],
   }[library.status];
-  $("library-folder").textContent = folderState[0];
-  $("library-folder").disabled = library.status === "unsupported";
+  LibraryButton.render($("library-folder"), $("library-where"), library.status, library.folder?.name);
   const skipped = library.skipped ? ` ${library.skipped} files there aren't single Bass Station patches, so they're left out.` : "";
   $("library-state").textContent = ready ? `"${library.folder.name}": ${plural(library.items.length, "sound")}.${skipped}` : folderState[1];
   for (const id of ["sound-import", "sound-export-all", "sound-search"]) $(id).disabled = !ready;
