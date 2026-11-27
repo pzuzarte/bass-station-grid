@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bass Station Grid</title>
-<link rel="stylesheet" href="style.css?v=202611251300">
+<link rel="stylesheet" href="style.css?v=202611261900">
 <script>
   // Set before the page draws, so it doesn't flash the other theme.
   try { if ((localStorage.getItem("midi-grids-theme") || localStorage.getItem("bass-station-grid-theme")) === "light") document.documentElement.dataset.theme = "light"; } catch {}
@@ -240,14 +240,15 @@
       </div>
       <p id="library-state" class="sounds-note"></p>
       <div class="search-row">
-        <input id="sound-search" type="search" placeholder="Search names" aria-label="Search sounds" spellcheck="false">
-        <button id="favourites-only" class="toggle" type="button" aria-pressed="false" title="Show only your favourite sounds">&#9733; Favourites</button>
+        <input id="sound-search" type="search" placeholder="Search names and tags" aria-label="Search sounds" spellcheck="false">
       </div>
+      <div id="sound-tags" class="tag-bar library-tags" role="group" aria-label="Show only favourite sounds, or those with a tag"></div>
       <p id="library-empty" class="sounds-note">No sounds in this folder yet. Save the current sound, import a .syx file, or add a backup's patches.</p>
       <ul id="sound-list" class="sound-list"></ul>
 
       <h2 class="backups-title">Patterns</h2>
-      <input id="pattern-search" type="search" placeholder="Search patterns" aria-label="Search patterns" spellcheck="false">
+      <input id="pattern-search" type="search" placeholder="Search patterns and tags" aria-label="Search patterns" spellcheck="false">
+      <div id="pattern-tags" class="tag-bar library-tags" role="group" aria-label="Show only favourite patterns, or those with a tag"></div>
       <p id="patterns-empty" class="sounds-note"></p>
       <ul id="pattern-list" class="sound-list"></ul>
 
@@ -355,7 +356,7 @@
       <li>The <b>Sound library</b> is a folder on this computer that you choose with <b>Choose library folder</b>. Each sound is saved there as its own .syx file, named after the sound, so it's kept even if the browser's data is cleared, and your usual backups include it. Where each sound came from is kept in <b>library-info.json</b> in the same folder. After Chrome restarts, click <b>Allow library folder</b> to use it again.</li>
       <li>.syx files you put in the folder yourself show up too, if each holds one Bass Station patch.</li>
       <li><b>Patterns</b>: the bar at the top of the Grid tab shows the name of the pattern you're on, large. <b>Save</b> (Cmd+S) saves it to its file again, under the same name, with its notes, bars, knob movements and tempo, and the sound the Bass Station is playing, edits included, when it can be read, unless the pattern has its own sound. That sound is also added to the sound library, named after the pattern. The first time, and with <b>Save as&hellip;</b> (Cmd+Shift+S), the Mac's Save dialog asks for a name and a folder. It starts in the library folder's <b>Patterns</b> folder, then in wherever you saved last. <b>Open&hellip;</b> opens a pattern file from anywhere into the pattern you're on. <b>Saved patterns</b> goes to the patterns in the library folder on the Library tab, where <b>Load</b> puts one into the pattern you're on, and sends its sound to the Bass Station through the editor, and <b>Notes only</b> keeps the sound you have. A pattern you load from there or open saves back to its own file. <b>Duplicate</b> makes a copy that doesn't, so its first Save asks where. Undo brings back what was there before a load. Export MIDI still makes a .mid file for other music software.</li>
-      <li>Click a sound to send it to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Rename</b> and <b>Delete</b> change its file. Click the star beside a sound to make it a favourite, and <b>Favourites</b> beside the search shows only those. Favourites are kept in library-info.json in the library folder, so they stay with your sounds. <b>Import .syx</b> adds every patch in one or more files, so a whole sound pack can be added at once by selecting all its files. Each patch is named after the name stored in it, where it has one. The same sound counts once, wherever it was stored on the Bass Station, so duplicates are left out, and any already in the library are cleared when it opens, keeping one of each, and <b>Export all</b> downloads the whole library as one file. <b>Add to library</b> on a backup adds each of its patches.</li>
+      <li>Click a sound to send it to the Bass Station through the editor, which sets every control. To keep it in a patch slot, save it on the Bass Station. <b>Rename</b> and <b>Delete</b> change its file. Click the star beside a sound or a saved pattern to make it a favourite, and <b>Tags</b> to give it tags, words or short phrases separated by commas, such as "warm, bass". Under each search, <b>&#9733; Favourites</b> and a button for each tag you use show only those, and you can pick several tags to narrow it further. The search finds tags too. Favourites and tags are kept in library-info.json in the library folder, so they stay with your sounds and patterns wherever the folder goes, and Song Grid's Add list shows and filters them the same way. <b>Import .syx</b> adds every patch in one or more files, so a whole sound pack can be added at once by selecting all its files. Each patch is named after the name stored in it, where it has one. The same sound counts once, wherever it was stored on the Bass Station, so duplicates are left out, and any already in the library are cleared when it opens, keeping one of each, and <b>Export all</b> downloads the whole library as one file. <b>Add to library</b> on a backup adds each of its patches.</li>
       <li>Reading patches needs MIDI with SysEx, which Chrome asks about the first time.</li>
     </ul>
 
@@ -415,9 +416,10 @@
 <script src="backup.js?v=202611251300"></script>
 <script src="recorder.js?v=202611251300"></script>
 <script src="pattern-clipboard.js?v=202611251530"></script>
+<script src="library-tags.js?v=202611261900"></script>
 <script src="library-button.js?v=202611261400"></script>
 <script src="grid-icons.js?v=202611261000"></script>
-<script src="app.js?v=202611261400"></script>
+<script src="app.js?v=202611261900"></script>
 <script>
   // The tools menu closes when you click elsewhere or press Escape.
   document.addEventListener("click", (event) => {

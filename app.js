@@ -1819,8 +1819,9 @@ function loadSavedPattern(item, { notesOnly = false } = {}) {
 function renderPatterns() {
   const ready = library.status === "ready";
   $("pattern-search").disabled = !ready;
-  const words = patterns.search.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = ready ? patterns.items.filter((item) => words.every((word) => item.name.toLowerCase().includes(word))) : [];
+  patternFilter.words = patterns.search;
+  LibraryTags.bar($("pattern-tags"), patternFilter, patterns.items.map((item) => library.info[patternKey(item)]), renderPatterns, { disabled: !ready });
+  const shown = ready ? patterns.items.filter((item) => LibraryTags.matches(patternFilter, item.name, library.info[patternKey(item)])) : [];
   $("patterns-empty").hidden = ready && shown.length > 0;
   $("patterns-empty").textContent = !ready
     ? "Patterns are saved in the library folder too. Click Choose library folder, beside Save."
@@ -1837,11 +1838,15 @@ function renderPatterns() {
     about.textContent = `${plural(item.bars, "bar")}, ${plural(item.notes.length, "note")}${item.bpm ? `, ${item.bpm} BPM` : ""}${item.sound ? ", with sound" : ""}`;
     if (item.soundFrom) about.title = `Sound from ${item.soundFrom}`;
     text.append(about);
+    const pills = LibraryTags.pills(library.info[patternKey(item)]);
+    if (pills) text.append(pills);
+    const star = LibraryTags.star(isFavouritePattern(item), item.name, () => toggleFavourite(item, patternKey(item)));
     const buttons = [actionButton("Load", item.sound
       ? `Put it into pattern ${state.current + 1} on the Grid tab, and send its sound to the Bass Station`
       : `Put it into pattern ${state.current + 1} on the Grid tab`, () => loadLibraryPattern(item))];
     if (item.sound) buttons.push(actionButton("Notes only", `Put it into pattern ${state.current + 1}, keeping the sound the Bass Station has now`, () => loadLibraryPattern(item, { notesOnly: true })));
-    row.append(text, ...buttons,
+    row.append(star, text, ...buttons,
+      actionButton("Tags", "Edit this pattern's tags", () => editTags(item.name, patternKey(item))),
       actionButton("Rename", "Rename this pattern and its file", async () => {
         const name = SoundFolder.cleanName(window.prompt("Rename this pattern", item.name) || "");
         if (!name || name === item.name) return;
@@ -1851,6 +1856,12 @@ function renderPatterns() {
           const [file] = (await folder.list()).filter((entry) => entry.name === item.name);
           await folder.write(fileName, file.bytes);
           await folder.remove(item.name);
+          // Its favourite and tags go with it.
+          if (library.info[patternKey(item)]) {
+            library.info[`${PATTERNS}/${fileName}`] = library.info[patternKey(item)];
+            delete library.info[patternKey(item)];
+            await library.saveInfo();
+          }
         } catch (error) {
           setStatus(`Couldn't rename it: ${error.message}`, true);
         }
@@ -1861,6 +1872,10 @@ function renderPatterns() {
         if (!window.confirm(`Delete "${item.name}.json" from the ${PATTERNS} folder?`)) return;
         try {
           await (await patternFolder()).remove(item.name);
+          if (library.info[patternKey(item)]) {
+            delete library.info[patternKey(item)];
+            await library.saveInfo();
+          }
         } catch (error) {
           setStatus(`Couldn't delete it: ${error.message}`, true);
         }
@@ -2003,20 +2018,34 @@ function markLoaded(bytes) {
   renderSounds();
 }
 
-// Favourites are kept with each sound's details in the library folder's info file.
+/* Favourites and tags are kept in the library folder's info file: with each sound's
+   details, by its name, and for each saved pattern by "Patterns/" and its name. See
+   library-tags.js, which works the same in every grid. */
+const patternKey = (item) => `${PATTERNS}/${item.name}`;
 const isFavourite = (item) => Boolean(library.info[item.name]?.favourite);
+const isFavouritePattern = (item) => Boolean(library.info[patternKey(item)]?.favourite);
+const tagsOf = (key) => LibraryTags.format(LibraryTags.of(library.info[key]));
+const soundFilter = LibraryTags.filter();
+const patternFilter = LibraryTags.filter();
 
-async function toggleFavourite(item) {
-  const details = { ...(library.info[item.name] || {}) };
-  if (details.favourite) delete details.favourite;
-  else details.favourite = true;
-  library.info[item.name] = details;
+async function changeInfo(key, edit) {
+  const kept = LibraryTags.tidy(edit({ ...(library.info[key] || {}) }) || library.info[key] || {});
+  if (kept) library.info[key] = kept;
+  else delete library.info[key];
   try {
     await library.saveInfo();
   } catch (error) {
-    setStatus(`Couldn't save favourites to the library folder: ${error.message}`, true);
+    setStatus(`Couldn't save that to the library folder: ${error.message}`, true);
   }
   renderSounds();
+}
+
+const toggleFavourite = (item, key = item.name) => changeInfo(key, (entry) => ({ ...entry, favourite: !entry.favourite }));
+
+function editTags(name, key) {
+  const known = LibraryTags.counts(Object.values(library.info)).map((entry) => entry.tag);
+  const answer = LibraryTags.ask(name, library.info[key], known);
+  if (answer !== null) changeInfo(key, (entry) => ({ ...entry, tags: answer }));
 }
 
 const isLoaded = (item) => Boolean(state.loadedSound) && BassSounds.sameSound(item.bytes, state.loadedSound);
@@ -2340,12 +2369,15 @@ function renderSounds() {
   $("library-state").textContent = ready ? `"${library.folder.name}": ${plural(library.items.length, "sound")}.${skipped}` : folderState[1];
   for (const id of ["sound-import", "sound-export-all", "sound-search"]) $(id).disabled = !ready;
 
-  const words = sounds.search.toLowerCase().split(/\s+/).filter(Boolean);
   const fromOf = (item) => library.info[item.name]?.from || "";
-  const shown = ready ? library.items.filter((item) => (!state.favouritesOnly || isFavourite(item))
-    && words.every((word) => `${item.name} ${fromOf(item)}`.toLowerCase().includes(word))) : [];
-  $("favourites-only").setAttribute("aria-pressed", String(state.favouritesOnly));
-  $("favourites-only").disabled = !ready;
+  soundFilter.favourites = state.favouritesOnly;
+  soundFilter.words = sounds.search;
+  LibraryTags.bar($("sound-tags"), soundFilter, library.items.map((item) => library.info[item.name]), () => {
+    state.favouritesOnly = soundFilter.favourites;
+    saveSoon();
+    renderSounds();
+  }, { disabled: !ready });
+  const shown = ready ? library.items.filter((item) => LibraryTags.matches(soundFilter, item.name, library.info[item.name], fromOf(item))) : [];
   $("library-empty").hidden = !ready || shown.length > 0;
   $("library-empty").textContent = !library.items.length
     ? "No sounds in this folder yet. Save the current sound, import a .syx file, or add a backup's patches."
@@ -2356,10 +2388,7 @@ function renderSounds() {
     const row = document.createElement("li");
     const loaded = isLoaded(item);
     const favourite = isFavourite(item);
-    const star = actionButton(favourite ? "\u2605" : "\u2606", favourite ? "Remove from favourites" : "Add to favourites", () => toggleFavourite(item));
-    star.className = "favourite";
-    star.setAttribute("aria-pressed", String(favourite));
-    star.setAttribute("aria-label", `${favourite ? "Remove" : "Add"} ${item.name} ${favourite ? "from" : "to"} favourites`);
+    const star = LibraryTags.star(favourite, item.name, () => toggleFavourite(item));
     row.className = `sound-row selectable${loaded ? " loaded" : ""}`;
     if (loaded) row.setAttribute("aria-current", "true");
     // The name is a button, so clicking anywhere on the row, or pressing Enter on it,
@@ -2372,12 +2401,15 @@ function renderSounds() {
     const from = document.createElement("small");
     from.textContent = `${loaded ? "On the Bass Station now. " : ""}${fromOf(item) || `Patch ${BassSounds.slotOf(BassSounds.split(item.bytes)[0])}`}`;
     text.append(from);
+    const pills = LibraryTags.pills(library.info[item.name]);
+    if (pills) text.append(pills);
     row.addEventListener("click", (event) => {
       if (event.target.closest("button") && !event.target.closest(".sound-name")) return;
       useForPattern(item.name, item.bytes);
       loadSound(item);
     });
     row.append(star, text,
+      actionButton("Tags", "Edit this sound's tags", () => editTags(item.name, item.name)),
       actionButton("Rename", "Rename this sound and its file", async () => {
         const name = window.prompt("Rename this sound", item.name)?.trim();
         if (!name) return;
@@ -2441,11 +2473,6 @@ function bindSounds() {
   $("save-current").addEventListener("click", saveCurrentSound);
   $("sound-search").addEventListener("input", (event) => {
     sounds.search = event.target.value;
-    renderSounds();
-  });
-  $("favourites-only").addEventListener("click", () => {
-    state.favouritesOnly = !state.favouritesOnly;
-    saveSoon();
     renderSounds();
   });
   $("sound-import").addEventListener("click", () => $("sound-import-file").click());
@@ -3000,16 +3027,18 @@ function catalog() {
   const ready = library.status === "ready";
   return {
     grid: slotChoices(),
-    patterns: ready ? patterns.items.map((item) => ({ id: `file:${item.name}`, label: item.name, meta: `${barsText(item.bars)}, ${notesText(item.notes.length)}` })) : [],
+    patterns: ready ? patterns.items.map((item) => ({
+      id: `file:${item.name}`, label: item.name, meta: `${barsText(item.bars)}, ${notesText(item.notes.length)}`, favourite: isFavouritePattern(item), tags: tagsOf(patternKey(item)),
+    })) : [],
     sounds: [
       ...(canReadPatch() ? [{ id: "current", label: "The sound the Bass Station is playing", meta: "Read from it" }] : []),
-      ...(ready ? library.items.map((item) => ({ id: `lib:${item.name}`, label: item.name, meta: "Sound", favourite: isFavourite(item) })) : []),
+      ...(ready ? library.items.map((item) => ({ id: `lib:${item.name}`, label: item.name, meta: "Sound", favourite: isFavourite(item), tags: tagsOf(item.name) })) : []),
     ],
     note: LibraryButton.songNote(library.status, "Bass Station Grid", "saved patterns and sounds"),
   };
 }
 
-async function fetchPicked({ patterns: ids = [], sound = null } = {}) {
+async function fetchPicked({ patterns: ids = [], sound = null, sounds = null } = {}) {
   const list = Array.isArray(ids) ? ids : [];
   const picked = pickedSlots(list);
   for (const id of list) {
@@ -3019,10 +3048,21 @@ async function fetchPicked({ patterns: ids = [], sound = null } = {}) {
     if (item.lanes) data.lanes = JSON.parse(JSON.stringify(item.lanes));
     picked.push({ id, ref: null, label: item.name, length: barsText(item.bars), notes: item.notes.length, data });
   }
+  // Song Grid can keep several of this grid's sounds, and asks for them as a list.
+  const kept = [];
+  for (const id of Array.isArray(sounds) ? sounds : sound ? [sound] : []) {
+    const one = await pickedSound(id);
+    if (one) kept.push(one);
+  }
+  return { patterns: picked, sound: kept[0] || null, sounds: kept };
+}
+
+// One sound Song Grid asked for, by its id in the catalog, ready to keep with a song.
+async function pickedSound(sound) {
   let kept = null;
   if (sound === "current") kept = (await collectAssets()).sound;
   else if (soundById(sound)) kept = { label: soundById(sound).name, data: { patch: Array.from(soundById(sound).bytes) } };
-  return { patterns: picked, sound: kept };
+  return kept;
 }
 
 // Song Grid sends pattern files chosen on the computer, and this reads them as Load
