@@ -3005,7 +3005,7 @@ function catalog() {
       ...(canReadPatch() ? [{ id: "current", label: "The sound the Bass Station is playing", meta: "Read from it" }] : []),
       ...(ready ? library.items.map((item) => ({ id: `lib:${item.name}`, label: item.name, meta: "Sound", favourite: isFavourite(item) })) : []),
     ],
-    note: ready ? "" : "Choose the sound library folder in Bass Station Grid to pick from its saved patterns and sounds too.",
+    note: LibraryButton.songNote(library.status, "Bass Station Grid", "saved patterns and sounds"),
   };
 }
 
